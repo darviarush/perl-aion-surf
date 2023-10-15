@@ -10,14 +10,14 @@ our @EXPORT = our @EXPORT_OK = grep {
 	*{$Aion::Surf::{$_}}{CODE} && !/^(_|(NaN|import)\z)/n
 } keys %Aion::Surf::;
 
-sub escape_url_param($) {
-	my ($param) = @_;
+sub escape_url_param(;$) {
+	my ($param) = @_ == 0? $_: @_;
 	$param =~ s/[&=?#+\s]/$& eq " "? "+": sprintf "%%%02X", ord $&/ge;
 	$param
 }
 
-sub escape_url_params($) {
-	my ($param) = @_;
+sub escape_url_params(;$) {
+	my ($param) = @_ == 0? $_: @_;
 
 	join "&",
 		map { my $val = $param->{$_};
@@ -31,42 +31,29 @@ sub escape_url_params($) {
 		grep {defined $param->{$_}} sort keys %$param
 }
 
+# Настраиваем json
 sub json() {
 	require JSON::XS;
-	JSON::XS->new->allow_nonref->indent(1)->space_after(1)->canonical(1)
+	my $json = JSON::XS->new->allow_nonref->indent(1)->space_after(1)->canonical(1);
+	*json = sub() {$json};
+	goto &json
 }
 
-sub to_json($) {
-	json->encode($_[0])
+# В json
+sub to_json(;$) {
+	json->encode(@_ == 0? $_: @_)
 }
 
-sub from_json($) {
-	json->decode($_[0])
-}
-
-my %HTML_SIM = qw/< &lt; > &gt; & &amp; ' &#39; " &quot;/;
-sub to_html (@) {
-	local $_ = join "", @_;
-	s/[<>&\'\"]/$HTML_SIM{$&}/ge;
-	$_
-}
-
-# вырезает из html-я все теги и переводит энтишены в символы
-sub from_html ($) {
-	require html;
-	html::html2text($_[0])
-}
-
-# вырезает из html-я опасные теги
-sub safe_html ($;$) {
-	require html;
-	html::safe4html(@_)
+# Из json
+sub from_json(;$) {
+	json->decode(@_ == 0? $_: @_)
 }
 
 # Парсит и нормализует url
-sub parse_url($;$) {
-	my ($link, $onpage) = @_;
-
+sub parse_url(;$) {
+	my ($link) = @_ == 0? $_: @_;
+	my $onpage;
+	($link, $onpage) = @$link if ref $link eq "ARRAY";
 	$onpage //= "off://off";
 	my $orig = $link;
 
@@ -121,8 +108,10 @@ sub parse_url($;$) {
 }
 
 # Нормализует url
-sub normalize_url($;$) {
-	my ($link, $onpage) = @_;
+sub normalize_url(;$) {
+	my ($link) = @_ == 0? $_: @_;
+	my $onpage;
+	($link, $onpage) = @$link if ref $link eq "ARRAY";
 	my $x = ref $link? $link: parse_url $link, $onpage;
 	join "", $x->{proto}, "://", $x->{domen}, $x->{path}, exists $x->{query}? ("?", $x->{query}): (), exists $x->{hash}? ("#", $x->{hash}): ();
 }
@@ -140,27 +129,26 @@ sub _lwp_simple {
 	#$ua->env_proxy;
 	$ua->timeout($main_config::www_timeout // 10);
 	$ua->local_address($main_config::www_from_ip) if $main_config::www_from_ip;
-	*www_get = \&_www_get;
-	*www_head = \&_www_head;
-	*www = \&_www;
+	*head = \&_head;
+	*get = \&_get;
+	*post = \&_post;
+	*put = \&_put;
+	*patch = \&_patch;
+	*del = \&_del;
 }
 
-sub www_get($;$) { _lwp_simple(); goto &_www_get }
-sub www_head($) { _lwp_simple(); goto &_www_head }
-sub www(@) { _lwp_simple(); goto &_www }
- 
-sub _www_get($;$) {
-	_www_sleep;
-	
-	$_[1] = my $response = $ua->get($_[0]);
-	my $data;
+sub head (;$) { _lwp_simple(); goto &head  }
+sub get  (;$) { _lwp_simple(); goto &get   }
+sub post (;$) { _lwp_simple(); goto &post  }
+sub put  (;$) { _lwp_simple(); goto &put   }
+sub patch(;$) { _lwp_simple(); goto &patch }
+sub del  (;$) { _lwp_simple(); goto &del   }
+sub surf  (@) { _lwp_simple(); goto &surf  }
 
-	$data = $response->decoded_content if $response->is_success;
+sub _head(;$) {
+	my $req = (@_ == 0? $_: $_[0]);
+	surf HEAD => $req, res => \my $response;
 
-	$data
-}
-
-sub _www_head($) {
 	_www_sleep;
 	my $request = HTTP::Request->new(HEAD => @_);
 	my $response = $ua->request($request);
@@ -178,7 +166,11 @@ sub _www_head($) {
 	wantarray? (): undef;
 }
 
-sub _www(@) {
+sub _get(;$) {
+	surf GET => (@_ == 0? $_: $_[0]), res => \my $response;
+}
+
+sub _surf(@) {
 	_www_sleep;
 	my ($method, $url, %set) = @_;
 	
