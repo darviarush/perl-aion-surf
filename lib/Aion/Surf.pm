@@ -5,49 +5,69 @@ use common::sense;
 
 our $VERSION = "0.0.0-prealpha";
 
-require Exporter;
+use JSON::XS qw//;
+use List::Util qw/pairmap/;
+use LWP::UserAgent qw//;
+
+use Exporter qw/import/;
 our @EXPORT = our @EXPORT_OK = grep {
 	*{$Aion::Surf::{$_}}{CODE} && !/^(_|(NaN|import)\z)/n
 } keys %Aion::Surf::;
 
+#@category json
+
+# Настраиваем json
+our $JSON = JSON::XS->new->allow_nonref->indent(1)->space_after(1)->canonical(1);
+
+# В json
+sub to_json(;$) {
+	$JSON->encode(@_ == 0? $_: @_)
+}
+
+# Из json
+sub from_json(;$) {
+	$JSON->decode(@_ == 0? $_: @_)
+}
+
+#@category escape url
+
+use constant UNSAFE_RFC3986 => qr/[^A-Za-z0-9\-\._~]/;
+
 sub escape_url_param(;$) {
 	my ($param) = @_ == 0? $_: @_;
-	$param =~ s/[&=?#+\s]/$& eq " "? "+": sprintf "%%%02X", ord $&/ge;
+	$param =~ s/${\ UNSAFE_RFC3986}/$& eq " "? "+": sprintf "%%%02X", ord $&/age;
 	$param
+}
+
+sub _escape_url_params {
+	my ($key, $param) = @_;
+
+	!defined($param)? ():
+	$param eq 1? $key:
+	ref $param eq "HASH"? do {
+		join "&", map _escape_url_params("${key}[$_]", $param->{$_}), sort keys %$param
+	}:
+	ref $param eq "ARRAY"? do {
+		join "&", map _escape_url_params("${key}[]", $_), @$param
+	}:
+	"$key=${\ escape_url_param($param)}"
 }
 
 sub escape_url_params(;$) {
 	my ($param) = @_ == 0? $_: @_;
 
-	join "&",
-		map { my $val = $param->{$_};
-			ref $val eq "ARRAY"? (
-				(grep /^[^,]+\z/, @$val) == @$val? "$_=" . join(",", map escape_url_param($_), @$val):
-				do { my $key = $_; map "${key}[]=${\escape_url_param($_)}", @$val }
-			):
-			$val eq 1? "$_":
-			"$_=" . escape_url_param($val) 
-		}
-		grep {defined $param->{$_}} sort keys %$param
+	join "&", map _escape_url_params($_, $param->{$_}), sort keys %$param
 }
 
-# Настраиваем json
-sub json() {
-	require JSON::XS;
-	my $json = JSON::XS->new->allow_nonref->indent(1)->space_after(1)->canonical(1);
-	*json = sub() {$json};
-	goto &json
-}
+# #@see https://habr.com/ru/articles/63432/
+# # В multipart/form-data
+# sub to_multipart(;$) {
+# 	my ($param) = @_ == 0? $_: @_;
+# 	$param =~ s/[&=?#+\s]/$& eq " "? "+": sprintf "%%%02X", ord $&/ge;
+# 	$param
+# }
 
-# В json
-sub to_json(;$) {
-	json->encode(@_ == 0? $_: @_)
-}
-
-# Из json
-sub from_json(;$) {
-	json->decode(@_ == 0? $_: @_)
-}
+#@category parse url
 
 # Парсит и нормализует url
 sub parse_url(;$) {
@@ -116,66 +136,42 @@ sub normalize_url(;$) {
 	join "", $x->{proto}, "://", $x->{domen}, $x->{path}, exists $x->{query}? ("?", $x->{query}): (), exists $x->{hash}? ("#", $x->{hash}): ();
 }
 
-our $ua;
+#@category surf
+
+use config TIMEOUT => 10;
+use config FROM_IP => undef;
+use config AGENT => q{Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36 OPR/92.0.0.0};
+
+our $ua = LWP::UserAgent->new;
+$ua->agent(AGENT);
+#$ua->env_proxy;
+$ua->timeout(TIMEOUT);
+$ua->local_address(FROM_IP) if FROM_IP;
+$ua->cookie_jar(HTTP::Cookies->new);
+
+# Между вызовами делаем случайный интервал (для граббинга - чтобы не быть заблокированным за автоматические обращения)
 our $LAST_REQUEST = Time::HiRes::time();
-sub _www_sleep() { Time::HiRes::sleep(rand + .5) if Time::HiRes::time() - $LAST_REQUEST < 2; $LAST_REQUEST = Time::HiRes::time() }
+sub _sleep() { Time::HiRes::sleep(rand + .5) if Time::HiRes::time() - $LAST_REQUEST < 2; $LAST_REQUEST = Time::HiRes::time() }
 
-sub _lwp_simple {
-	require LWP::UserAgent;
-	require HTTP::Date;
-	require HTTP::Status;
-	$ua = LWP::UserAgent->new;
-	$ua->agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36 OPR/92.0.0.0");
-	#$ua->env_proxy;
-	$ua->timeout($main_config::www_timeout // 10);
-	$ua->local_address($main_config::www_from_ip) if $main_config::www_from_ip;
-	*head = \&_head;
-	*get = \&_get;
-	*post = \&_post;
-	*put = \&_put;
-	*patch = \&_patch;
-	*del = \&_del;
-}
+sub surf(@) {
+	_sleep;
 
-sub head (;$) { _lwp_simple(); goto &head  }
-sub get  (;$) { _lwp_simple(); goto &get   }
-sub post (;$) { _lwp_simple(); goto &post  }
-sub put  (;$) { _lwp_simple(); goto &put   }
-sub patch(;$) { _lwp_simple(); goto &patch }
-sub del  (;$) { _lwp_simple(); goto &del   }
-sub surf  (@) { _lwp_simple(); goto &surf  }
+	my $method = $_[0] =~ /^(\w+)\z/ ? shift: "GET";
+	my $url = shift;
+	my $headers;
+	my $data = ref $_[0]? shift: undef;
+	$headers = $data, undef $data if $method =~ /^(GET|HEAD)\z/n;
 
-sub _head(;$) {
-	my $req = (@_ == 0? $_: $_[0]);
-	surf HEAD => $req, res => \my $response;
+	my %set = @_;
 
-	_www_sleep;
-	my $request = HTTP::Request->new(HEAD => @_);
-	my $response = $ua->request($request);
- 
-	if ($response->is_success) {
-		return $response unless wantarray;
-		return
-			scalar $response->header('Content-Type'),
-			scalar $response->header('Content-Length'),
-			HTTP::Date::str2time($response->header('Last-Modified')),
-			HTTP::Date::str2time($response->header('Expires')),
-			scalar $response->header('Server'),
-		;
+	my $query = delete $set{query};
+	if(defined $query) {
+		$url = join "", $url, $url =~ /\?/ ? "&": "?", escape_url_params $query;
 	}
-	wantarray? (): undef;
-}
 
-sub _get(;$) {
-	surf GET => (@_ == 0? $_: $_[0]), res => \my $response;
-}
+	my $request = HTTP::Request->new($method => $url);
 
-sub _surf(@) {
-	_www_sleep;
-	my ($method, $url, %set) = @_;
-	
-	my $request = HTTP::Request->new(uc $method => $url);
-	
+	# Устанавливаем данные
 	my $json = delete $set{json};
 	if(defined $json) {
 		$request->header('Content-Type' => 'application/json; charset=utf-8');
@@ -186,79 +182,118 @@ sub _surf(@) {
 
 	my $form = delete $set{form};
 	if(defined $form) {
-		require URI::Escape;
 		$request->header('Content-Type' => 'application/x-www-form-urlencoded');
-		$form = join "&", pairmap { join "=", URI::Escape::uri_escape_utf8($a) => URI::Escape::uri_escape_utf8($b) } (ref $form eq "HASH"? (map { ($_ => $form->{$_}) } sort keys %$form): @$form);
-		$request->content($form);
+		$request->content(escape_url_params $form);
 	}
-	
-	if(my $headers = delete $set{headers}) {
+
+	if($headers = delete($set{headers}) // $headers) {
 		if(ref $headers eq 'HASH') {
 			$request->header($_, $headers->{$_}) for sort keys %$headers;
 		} else {
-			pairmap { $request->header($a, $b); () } @$headers;
+			for my ($key, $val) (@$headers) {
+				$request->header($key, $val);
+			}
 		}
 	}
-	
+
+	if(my $cookie_href = delete $set{cookie}) {
+		my $jar = $ua->cookie_jar;
+		my $url_href = parse_url $url;
+		my $domain = $url_href->{dom};
+		$domain = "localhost.local" if $domain eq "localhost";
+
+		for my $key (sort keys %$cookie_href) {
+
+			my $av;
+			my $val = $cookie_href->{$key};
+			$av = $val, $val = shift @$av, $av = {@$av} if ref $val;
+
+			$jar->set_cookie(
+				$a->{version},
+				$key => $val,
+				$av->{path} // "/",
+				$av->{domain} // $domain,
+				$av->{port},
+				$av->{path_spec},
+				$av->{secure},
+				$av->{maxage},
+				$av->{discard},
+				$av
+			);
+		}
+	}
+
 	my $response_set = delete $set{response};
-	
-	die "Неизвестные ключи: " . join ", ", keys %set if keys %set;
-	
+
+	die "Unknown keys: " . join ", ", keys %set if keys %set;
+
 	my $response = $ua->request($request);
 	$$response_set = $response if ref $response_set;
-	
-	#p $response if !$response->is_success;
-	
+
+	return $response->is_success? 1: "" if $method eq "HEAD";
+
 	my $data = $response->decoded_content;
 	eval { $data = from_json($data) } if $data =~ m!^\{!;
 
 	$data
 }
 
+sub head (;$) { my $x = @_ == 0? shift: $_; surf HEAD   => (ref $x? @{$x}: $x) }
+sub get  (;$) { my $x = @_ == 0? shift: $_; surf GET    => (ref $x? @{$x}: $x) }
+sub post (;$) { my $x = @_ == 0? shift: $_; surf POST   => (ref $x? @{$x}: $x) }
+sub put  (;$) { my $x = @_ == 0? shift: $_; surf PUT    => (ref $x? @{$x}: $x) }
+sub patch(;$) { my $x = @_ == 0? shift: $_; surf PATCH  => (ref $x? @{$x}: $x) }
+sub del  (;$) { my $x = @_ == 0? shift: $_; surf DELETE => (ref $x? @{$x}: $x) }
+
+
+use config TELEGRAM_BOT_TOKEN => undef;
+
 # Отправляет сообщение телеграм
 sub chat_message($$) {
 	my ($chat_id, $message) = @_;
-	
-	my $ok = www POST => "https://api.telegram.org/bot$main_config::telegram_bot_token/sendMessage", response => \my $response, json => {
+
+	my $ok = post ["https://api.telegram.org/bot${\ TELEGRAM_BOT_TOKEN}/sendMessage", response => \my $response, json => {
 		chat_id => $chat_id,
 		text => $message,
 		disable_web_page_preview => 1,
 		parse_mode => 'Html',
-	};
-	
+	}];
+
 	p($response), p($ok), die $ok->{description} if !$ok->{ok};
-	
+
 	$ok
 }
 
+
+use config TELEGRAM_BOT_CHAT_ID => undef;
+use config TELEGRAM_BOT_TECH_ID => undef;
+
 # Отправляет сообщение в телеграм-бот
-sub bot_message($) { chat_message $main_config::telegram_bot_chat_id, $_[0] }
+sub bot_message(;$) { chat_message TELEGRAM_BOT_CHAT_ID, @_ == 0? $_: $_[0] }
 # Отправляет сообщение в технический телеграм канал
-sub tech_message($) { chat_message $main_config::telegram_tech_chat_id, $_[0] }
+sub tech_message(;$) { chat_message TELEGRAM_BOT_TECH_ID, @_ == 0? $_: $_[0] }
 
 
 # Получает последние сообщения отправленные боту
 sub bot_update() {
-	my ($message) = @_;
-	
 	my @updates;
-	
+
 	for(my $offset = 0;;) {
-	
-		my $ok = www POST => "https://api.telegram.org/bot$main_config::telegram_bot_token/getUpdates", json => {
+
+		my $ok = post ["https://api.telegram.org/bot${\ TELEGRAM_BOT_TOKEN}/getUpdates", json => {
 			offset => $offset,
-		};
-		
+		}];
+
 		die $ok->{description} if !$ok->{ok};
-		
+
 		my $result = $ok->{result};
 		return \@updates if !@$result;
-		
+
 		push @updates, map $_->{message}, grep $_->{message}, @$result;
-		
+
 		$offset = $result->[$#$result]{update_id} + 1;
 	}
-	
+
 	return \@updates;
 }
 
