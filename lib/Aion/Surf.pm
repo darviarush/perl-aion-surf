@@ -8,10 +8,13 @@ our $VERSION = "0.0.0-prealpha";
 use JSON::XS qw//;
 use List::Util qw/pairmap/;
 use LWP::UserAgent qw//;
+use HTTP::Cookies qw//;
 
 use Exporter qw/import/;
 our @EXPORT = our @EXPORT_OK = grep {
-	*{$Aion::Surf::{$_}}{CODE} && !/^(_|(NaN|import)\z)/n
+	ref \$Aion::Surf::{$_} eq "GLOB"
+		&& *{$Aion::Surf::{$_}}{CODE}
+			&& !/^(_|(NaN|import)\z)/n
 } keys %Aion::Surf::;
 
 #@category json
@@ -33,7 +36,7 @@ sub from_json(;$) {
 
 use constant UNSAFE_RFC3986 => qr/[^A-Za-z0-9\-\._~]/;
 
-sub escape_url_param(;$) {
+sub to_url_param(;$) {
 	my ($param) = @_ == 0? $_: @_;
 	$param =~ s/${\ UNSAFE_RFC3986}/$& eq " "? "+": sprintf "%%%02X", ord $&/age;
 	$param
@@ -50,10 +53,10 @@ sub _escape_url_params {
 	ref $param eq "ARRAY"? do {
 		join "&", map _escape_url_params("${key}[]", $_), @$param
 	}:
-	"$key=${\ escape_url_param($param)}"
+	"$key=${\ to_url_param($param)}"
 }
 
-sub escape_url_params(;$) {
+sub to_url_params(;$) {
 	my ($param) = @_ == 0? $_: @_;
 
 	join "&", map _escape_url_params($_, $param->{$_}), sort keys %$param
@@ -92,14 +95,14 @@ sub parse_url(;$) {
 		( \? (?<query> [^\#]*  ) )?
 		( \# (?<hash>  .*	  ) )?
 	\z!xn || die "Ссылка „$link” — не url!";
-	
+
 	my $x = {%+, orig => $orig, link => $link};
-	
+
 	# нормализуем
 	$x->{proto} = lc $x->{proto};
 	$x->{dom} = lc $x->{dom};
 	$x->{domen} = $x->{dom} =~ s/^www\.//r;
-	
+
 	my @path = split m!/!, $x->{path}; my @p;
 
 	for my $p (@path) {
@@ -123,7 +126,7 @@ sub parse_url(;$) {
 			$x->{dir} = $x->{path};
 		}
 	} else { delete $x->{path} }
-	
+
 	return $x;
 }
 
@@ -298,3 +301,192 @@ sub bot_update() {
 }
 
 1;
+
+__END__
+
+=encoding utf-8
+
+=head1 NAME
+
+Aion::Surf - surfing by internet
+
+=head1 VERSION
+
+0.0.0-prealpha
+
+=head1 SYNOPSIS
+
+	use Aion::Surf;
+	use Test::Mock::LWP;
+	
+	get "http://api.xyz"  # --> []
+
+=head1 DESCRIPTION
+
+Aion::Surf contains a minimal set of functions for surfing the Internet. The purpose of the module is to make surfing as easy as possible, without specifying many additional settings.
+
+=head1 SUBROUTINES
+
+=head2 to_json ($data)
+
+Translate data to json format.
+
+	my $data = {
+	    a => 10,
+	};
+	
+	my $result = '{
+	    "a": 10
+	}';
+	
+	to_json $data # -> $result
+	
+	local $_ = $data;
+	to_json # -> $result
+
+=head2 from_json ($string)
+
+Parse string in json format to perl structure.
+
+	from_json '{"a": 10}' # --> {a => 10}
+
+=head2 to_url_param (;$scalar)
+
+Escape scalar to part of url search.
+
+	to_url_param "a b" # => a+b
+	
+	[map to_url_param, "a b", "🦁"] # --> [qw/a+b %/]
+
+=head2 to_url_params (;$hash_ref)
+
+Generates the search part of the url.
+
+	to_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
+
+=over
+
+=item 1. Keys with undef values not stringify.
+
+=item 2. Empty value is empty.
+
+=item 3. C<1> value stringify key only.
+
+=item 4. Keys stringify in alfabet order.
+
+=back
+
+	to_url_params {k => "", n => undef, f => 1}  # => f&k=
+
+=head2 parse_url (;$url)
+
+Parses and normalizes url.
+
+	parse_url ""    # --> {}
+	
+	local $_ = ["/page", "https://main.com/pager/mix"];
+
+See also C<URL::XS>.
+
+=head2 normalize_url (;$url)
+
+Normalizes url.
+
+	normalize_url ""  # -> .3
+
+See also C<URI::URL>.
+
+=head2 surf (@params)
+
+Send request by LWP::UserAgent and adapt response.
+
+	surf "https://ya.ru", cookie => {}  # -> .3
+
+=head2 head (;$)
+
+Check resurce in internet. Returns CL<HTTP::Request> if exists resurce in internet, otherwice returns C<undef>.
+
+	head "" # -> .3
+
+=head2 get (;$url)
+
+Get resurce in internet.
+
+	get "http://127.0.0.1/" # -> .3
+
+=head2 post (;$url)
+
+Add resurce in internet.
+
+	post ["", {a => 1, b => 2}] # -> .3
+
+=head2 put (;$url)
+
+Create or update resurce in internet.
+
+	put  # -> .3
+
+=head2 patch (;$url)
+
+Set attributes on resurce in internet.
+
+	my $aion_surf = Aion::Surf->new;
+	$aion_surf->patch  # -> .3
+
+=head2 del (;$url)
+
+Delete resurce in internet.
+
+	del "" # -> .3
+
+=head2 chat_message ($chat_id, $message)
+
+Sends a message to a telegram chat.
+
+	chat_message "ABCD", "hi!"  # -> .3
+
+=head2 bot_message (;$message)
+
+Sends a message to a telegram bot.
+
+	bot_message "hi!" # -> .3
+
+=head2 tech_message (;$message)
+
+Sends a message to a technical telegram channel.
+
+	tech_message "hi!" # -> .3
+
+=head2 bot_update ()
+
+Receives the latest messages sent to the bot.
+
+	bot_update  # --> 
+
+=head1 SEE ALSO
+
+=over
+
+=item * LWP::Simple
+
+=item * LWP::Simple::Post
+
+=item * HTTP::Request::Common
+
+=item * WWW::Mechanize
+
+=item * LLL<https://habr.com/ru/articles/63432/>
+
+=back
+
+=head1 AUTHOR
+
+Yaroslav O. Kosmina LL<mailto:dart@cpan.org>
+
+=head1 LICENSE
+
+⚖ B<GPLv3>
+
+=head1 COPYRIGHT
+
+The Aion::Surf module is copyright © 2023 Yaroslav O. Kosmina. Rusland. All rights reserved.

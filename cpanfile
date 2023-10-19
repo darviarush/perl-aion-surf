@@ -8,4 +8,7 @@ on 'test' => sub {
 };
 
 requires 'common::sense';
-requires 'JSON::XS';
+requires 'JSON::XS', '4.03';
+requires 'List::Util';
+requires 'LWP::UserAgent', '6.72';
+requires 'HTTP::Cookies';

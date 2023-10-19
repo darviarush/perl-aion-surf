@@ -10,10 +10,9 @@ Aion::Surf - surfing by internet
 
 ```perl
 use Aion::Surf;
+use Test::Mock::LWP;
 
-# set 
-
-$aion_surf  # -> 1
+get "http://api.xyz"  # --> []
 ```
 
 # DESCRIPTION
@@ -49,22 +48,22 @@ Parse string in json format to perl structure.
 from_json '{"a": 10}' # --> {a => 10}
 ```
 
-## escape_url_param (;$scalar)
+## to_url_param (;$scalar)
 
 Escape scalar to part of url search.
 
 ```perl
-escape_url_param "a b" # => a+b
+to_url_param "a b" # => a+b
 
-[map escape_url_param, "a b", "🦁"] # --> [qw/a+b %/]
+[map to_url_param, "a b", "🦁"] # --> [qw/a+b %/]
 ```
 
-## escape_url_params (;$hash_ref)
+## to_url_params (;$hash_ref)
 
 Generates the search part of the url.
 
 ```perl
-escape_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
+to_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
 ```
 
 1. Keys with undef values not stringify.
@@ -72,8 +71,8 @@ escape_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
 1. `1` value stringify key only.
 1. Keys stringify in alfabet order.
 
-```
-escape_url_params {k => "", n => undef, f => 1}  # => f&k=
+```perl
+to_url_params {k => "", n => undef, f => 1}  # => f&k=
 ```
 
 ## parse_url (;$url)
@@ -86,15 +85,17 @@ parse_url ""    # --> {}
 local $_ = ["/page", "https://main.com/pager/mix"];
 ```
 
-See also URL::XS.
+See also `URL::XS`.
 
 ## normalize_url (;$url)
 
 Normalizes url.
 
 ```perl
-normalize_url  # -> .3
+normalize_url ""  # -> .3
 ```
+
+See also `URI::URL`.
 
 ## surf (@params)
 
@@ -106,7 +107,7 @@ surf "https://ya.ru", cookie => {}  # -> .3
 
 ## head (;$)
 
-Send .
+Check resurce in internet. Returns `HTTP::Request` if exists resurce in internet, otherwice returns `undef`.
 
 ```perl
 head "" # -> .3
@@ -114,52 +115,51 @@ head "" # -> .3
 
 ## get (;$url)
 
-Get-request.
+Get resurce in internet.
 
 ```perl
 get "http://127.0.0.1/" # -> .3
 ```
 
-## post ($url)
+## post (;$url)
 
-Post-request.
+Add resurce in internet.
 
 ```perl
 post ["", {a => 1, b => 2}] # -> .3
 ```
 
-## put ($)
+## put (;$url)
 
-.
+Create or update resurce in internet.
 
 ```perl
 put  # -> .3
 ```
 
-## patch ()
+## patch (;$url)
 
-.
+Set attributes on resurce in internet.
 
 ```perl
 my $aion_surf = Aion::Surf->new;
 $aion_surf->patch  # -> .3
 ```
 
-## del (;)
+## del (;$url)
 
-.
+Delete resurce in internet.
 
 ```perl
-my $aion_surf = Aion::Surf->new;
-$aion_surf->del  # -> .3
+del "" # -> .3
 ```
 
 ## chat_message ($chat_id, $message)
 
-Отправляет сообщение телеграм
+Sends a message to a telegram chat.
 
 ```perl
-chat_message $chat_id, $message  # -> .3
+chat_message "ABCD", "hi!"  # -> .3
 ```
 
 ## bot_message (;$message)
@@ -167,7 +167,7 @@ chat_message $chat_id, $message  # -> .3
 Sends a message to a telegram bot.
 
 ```perl
-bot_message  # -> .3
+bot_message "hi!" # -> .3
 ```
 
 ## tech_message (;$message)
@@ -175,7 +175,7 @@ bot_message  # -> .3
 Sends a message to a technical telegram channel.
 
 ```perl
-tech_message  # -> .3
+tech_message "hi!" # -> .3
 ```
 
 ## bot_update ()
