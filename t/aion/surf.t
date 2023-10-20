@@ -10,9 +10,48 @@ use common::sense; use open qw/:std :utf8/; use Test::More 0.98; sub _mkpath_ { 
 # 
 subtest 'SYNOPSIS' => sub { 
 use Aion::Surf;
-use Test::Mock::LWP;
+use common::sense;
 
-::is_deeply scalar do {get "http://api.xyz"}, scalar do {[]}, 'get "http://api.xyz"  # --> []';
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+    my $response = HTTP::Response->new(200, "OK");
+
+    given ($request->method . " " . $request->uri) {
+        $response->content("get")    when $_ eq "GET http://example/ex";
+        $response->content("head")   when $_ eq "HEAD http://example/ex";
+        $response->content("post")   when $_ eq "POST http://example/ex";
+        $response->content("put")    when $_ eq "PUT http://example/ex";
+        $response->content("patch")  when $_ eq "PATCH http://example/ex";
+        $response->content("delete") when $_ eq "DELETE http://example/ex";
+
+        $response->content('{"a":10}')  when $_ eq "PATCH http://example/json";
+        default {
+            $response = HTTP::Response->new(404, "Not Found");
+            $response->content("nf");
+        }
+    }
+
+    $response
+};
+
+::is scalar do {get "http://example/ex"}, "get", 'get "http://example/ex"             # => get';
+::is scalar do {surf "http://example/ex"}, "get", 'surf "http://example/ex"            # => get';
+
+::is scalar do {head "http://example/ex"}, scalar do{1}, 'head "http://example/ex"            # -> 1';
+::is scalar do {head "http://example/not-found"}, scalar do{""}, 'head "http://example/not-found"     # -> ""';
+
+::is scalar do {surf HEAD => "http://example/ex"}, scalar do{1}, 'surf HEAD => "http://example/ex"    # -> 1';
+::is scalar do {surf HEAD => "http://example/not-found"}, scalar do{""}, 'surf HEAD => "http://example/not-found"  # -> ""';
+
+::is_deeply scalar do {[map { surf $_ => "http://example/ex" } qw/GET HEAD POST PUT PATCH DELETE/]}, scalar do {[qw/get 1 post put patch delete/]}, '[map { surf $_ => "http://example/ex" } qw/GET HEAD POST PUT PATCH DELETE/] # --> [qw/get 1 post put patch delete/]';
+
+::is_deeply scalar do {patch "http://example/json"}, scalar do {{a => 10}}, 'patch "http://example/json" # --> {a => 10}';
+
+::is_deeply scalar do {[map patch, qw! http://example/ex http://example/json !]}, scalar do {["patch", {a => 10}]}, '[map patch, qw! http://example/ex http://example/json !]  # --> ["patch", {a => 10}]';
+
+::is scalar do {get ["http://example/ex", headers => {Accept => "*/*"}]}, "get", 'get ["http://example/ex", headers => {Accept => "*/*"}]  # => get';
+::is scalar do {surf "http://example/ex", headers => [Accept => "*/*"]}, "get", 'surf "http://example/ex", headers => [Accept => "*/*"]   # => get';
 
 # 
 # # DESCRIPTION
@@ -31,8 +70,9 @@ my $data = {
 };
 
 my $result = '{
-    "a": 10
-}';
+   "a": 10
+}
+';
 
 ::is scalar do {to_json $data}, scalar do{$result}, 'to_json $data # -> $result';
 
@@ -55,7 +95,7 @@ done_testing; }; subtest 'from_json ($string)' => sub {
 done_testing; }; subtest 'to_url_param (;$scalar)' => sub { 
 ::is scalar do {to_url_param "a b"}, "a+b", 'to_url_param "a b" # => a+b';
 
-::is_deeply scalar do {[map to_url_param, "a b", "🦁"]}, scalar do {[qw/a+b %/]}, '[map to_url_param, "a b", "🦁"] # --> [qw/a+b %/]';
+::is_deeply scalar do {[map to_url_param, "a b", "🦁"]}, scalar do {[qw/a+b %1F981/]}, '[map to_url_param, "a b", "🦁"] # --> [qw/a+b %1F981/]';
 
 # 
 # ## to_url_params (;$hash_ref)
@@ -80,6 +120,7 @@ done_testing; }; subtest 'to_url_params (;$hash_ref)' => sub {
 # Parses and normalizes url.
 # 
 done_testing; }; subtest 'parse_url (;$url)' => sub { 
+use DDP; p my $x=parse_url "";
 ::is_deeply scalar do {parse_url ""}, scalar do {{}}, 'parse_url ""    # --> {}';
 
 local $_ = ["/page", "https://main.com/pager/mix"];
@@ -97,69 +138,76 @@ done_testing; }; subtest 'normalize_url (;$url)' => sub {
 # 
 # See also `URI::URL`.
 # 
-# ## surf (@params)
+# ## surf ([$method], $url, @params)
 # 
 # Send request by LWP::UserAgent and adapt response.
 # 
-done_testing; }; subtest 'surf (@params)' => sub { 
-::is scalar do {surf "https://ya.ru", cookie => {}}, scalar do{.3}, 'surf "https://ya.ru", cookie => {}  # -> .3';
+# `@params` maybe:
+# 
+# * `query` - add query params to `$url`.
+# * `json` - body request set in json format. Add header `Content-Type: application/json; charset=utf-8`.
+# * `form` - body request set in url params format. Add header `Content-Type: application/x-www-form-urlencoded`.
+# * `headers` - add headers. If `header` is array ref, then add in the order specified. If `header` is hash ref, then add in the alphabet order.
+# * `cookies` - add cookies. Same as: `cookies => {go => "xyz", session => ["abcd", path => "/page"]}`.
+# * `response` - returns response (as HTTP::Response) by this reference.
+# 
+done_testing; }; subtest 'surf ([$method], $url, @params)' => sub { 
+my $req = "
+";
+
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+
+::is scalar do {$request->as_string}, scalar do{$req}, '    $request->as_string # -> $req';
+
+    my $response = HTTP::Response->new(200, "OK");
+    $response
+};
+
+
+my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
+        'Accept' => '*/*,image/*',
+    ],
+    query => [x => 10, y => "🧨"],
+    cookies => {
+        go => "",
+        session => ["abcd", path => "/page"],
+    },
+;
+::is scalar do {$res}, scalar do{.3}, '$res # -> .3';
 
 # 
 # ## head (;$)
 # 
-# Check resurce in internet. Returns `HTTP::Request` if exists resurce in internet, otherwice returns `undef`.
-# 
-done_testing; }; subtest 'head (;$)' => sub { 
-::is scalar do {head ""}, scalar do{.3}, 'head "" # -> .3';
-
+# Check resurce in internet. Returns `1` if exists resurce in internet, otherwice returns `""`.
 # 
 # ## get (;$url)
 # 
-# Get resurce in internet.
-# 
-done_testing; }; subtest 'get (;$url)' => sub { 
-::is scalar do {get "http://127.0.0.1/"}, scalar do{.3}, 'get "http://127.0.0.1/" # -> .3';
-
+# Get content from resurce in internet.
 # 
 # ## post (;$url)
 # 
-# Add resurce in internet.
-# 
-done_testing; }; subtest 'post (;$url)' => sub { 
-::is scalar do {post ["", {a => 1, b => 2}]}, scalar do{.3}, 'post ["", {a => 1, b => 2}] # -> .3';
-
+# Add content resurce in internet.
 # 
 # ## put (;$url)
 # 
 # Create or update resurce in internet.
 # 
-done_testing; }; subtest 'put (;$url)' => sub { 
-::is scalar do {put}, scalar do{.3}, 'put  # -> .3';
-
-# 
 # ## patch (;$url)
 # 
 # Set attributes on resurce in internet.
 # 
-done_testing; }; subtest 'patch (;$url)' => sub { 
-my $aion_surf = Aion::Surf->new;
-::is scalar do {$aion_surf->patch}, scalar do{.3}, '$aion_surf->patch  # -> .3';
-
-# 
 # ## del (;$url)
 # 
 # Delete resurce in internet.
-# 
-done_testing; }; subtest 'del (;$url)' => sub { 
-::is scalar do {del ""}, scalar do{.3}, 'del "" # -> .3';
-
 # 
 # ## chat_message ($chat_id, $message)
 # 
 # Sends a message to a telegram chat.
 # 
 done_testing; }; subtest 'chat_message ($chat_id, $message)' => sub { 
-::is scalar do {chat_message "ABCD", "hi!"}, scalar do{.3}, 'chat_message "ABCD", "hi!"  # -> .3';
+::is scalar do {chat_message "ABCD", "hi!"}, "ok", 'chat_message "ABCD", "hi!"  # => ok';
 
 # 
 # ## bot_message (;$message)
@@ -167,7 +215,7 @@ done_testing; }; subtest 'chat_message ($chat_id, $message)' => sub {
 # Sends a message to a telegram bot.
 # 
 done_testing; }; subtest 'bot_message (;$message)' => sub { 
-::is scalar do {bot_message "hi!"}, scalar do{.3}, 'bot_message "hi!" # -> .3';
+::is scalar do {bot_message "hi!"}, "ok", 'bot_message "hi!" # => ok';
 
 # 
 # ## tech_message (;$message)
@@ -175,7 +223,7 @@ done_testing; }; subtest 'bot_message (;$message)' => sub {
 # Sends a message to a technical telegram channel.
 # 
 done_testing; }; subtest 'tech_message (;$message)' => sub { 
-::is scalar do {tech_message "hi!"}, scalar do{.3}, 'tech_message "hi!" # -> .3';
+::is scalar do {tech_message "hi!"}, "ok", 'tech_message "hi!" # => ok';
 
 # 
 # ## bot_update ()

@@ -153,12 +153,14 @@ $ua->local_address(FROM_IP) if FROM_IP;
 $ua->cookie_jar(HTTP::Cookies->new);
 
 # Между вызовами делаем случайный интервал (для граббинга - чтобы не быть заблокированным за автоматические обращения)
+our $SLEEP = 0;
 our $LAST_REQUEST = Time::HiRes::time();
-sub _sleep() { Time::HiRes::sleep(rand + .5) if Time::HiRes::time() - $LAST_REQUEST < 2; $LAST_REQUEST = Time::HiRes::time() }
+sub _sleep(;$) {
+	Time::HiRes::sleep(rand + .5) if Time::HiRes::time() - $LAST_REQUEST < 2;
+	$LAST_REQUEST = Time::HiRes::time();
+}
 
 sub surf(@) {
-	_sleep;
-
 	my $method = $_[0] =~ /^(\w+)\z/ ? shift: "GET";
 	my $url = shift;
 	my $headers;
@@ -167,24 +169,42 @@ sub surf(@) {
 
 	my %set = @_;
 
+	if(exists $set{sleep}) {
+		my $sleep = delete $set{sleep};
+	} else {
+		_sleep if $SLEEP;
+	}
+
 	my $query = delete $set{query};
 	if(defined $query) {
-		$url = join "", $url, $url =~ /\?/ ? "&": "?", escape_url_params $query;
+		$url = join "", $url, $url =~ /\?/ ? "&": "?", to_url_params $query;
 	}
 
 	my $request = HTTP::Request->new($method => $url);
 
+	my $validate_data = sub {
+		die "surf: data has already been provided!" if defined $data;
+		die "surf: sended data in $method!" if $method =~ /^(HEAD|GET)\z/;
+	};
+
 	# Устанавливаем данные
 	my $json = delete $set{json};
+	$json = $data, undef $data if not defined $json and ref $data eq "HASH";
 	if(defined $json) {
+		$validate_data->();
+
 		$request->header('Content-Type' => 'application/json; charset=utf-8');
-		$json = to_json($json);
-		utf8::encode($json) if utf8::is_utf8($json);
-		$request->content($json);
+		$data = to_json($json);
+		utf8::encode($data) if utf8::is_utf8($data);
+		$request->content($data);
 	}
 
 	my $form = delete $set{form};
+	$form = $data, undef $data if not defined $form and ref $data eq "HASH";
 	if(defined $form) {
+		$validate_data->();
+		$data = 1;
+
 		$request->header('Content-Type' => 'application/x-www-form-urlencoded');
 		$request->content(escape_url_params $form);
 	}
@@ -199,7 +219,7 @@ sub surf(@) {
 		}
 	}
 
-	if(my $cookie_href = delete $set{cookie}) {
+	if(my $cookie_href = delete $set{cookies}) {
 		my $jar = $ua->cookie_jar;
 		my $url_href = parse_url $url;
 		my $domain = $url_href->{dom};
@@ -233,20 +253,20 @@ sub surf(@) {
 	my $response = $ua->request($request);
 	$$response_set = $response if ref $response_set;
 
-	return $response->is_success? 1: "" if $method eq "HEAD";
+	return $response->is_success if $method eq "HEAD";
 
-	my $data = $response->decoded_content;
-	eval { $data = from_json($data) } if $data =~ m!^\{!;
+	my $content = $response->decoded_content;
+	eval { $content = from_json($content) } if $content =~ m!^\{!;
 
-	$data
+	$content
 }
 
-sub head (;$) { my $x = @_ == 0? shift: $_; surf HEAD   => (ref $x? @{$x}: $x) }
-sub get  (;$) { my $x = @_ == 0? shift: $_; surf GET    => (ref $x? @{$x}: $x) }
-sub post (;$) { my $x = @_ == 0? shift: $_; surf POST   => (ref $x? @{$x}: $x) }
-sub put  (;$) { my $x = @_ == 0? shift: $_; surf PUT    => (ref $x? @{$x}: $x) }
-sub patch(;$) { my $x = @_ == 0? shift: $_; surf PATCH  => (ref $x? @{$x}: $x) }
-sub del  (;$) { my $x = @_ == 0? shift: $_; surf DELETE => (ref $x? @{$x}: $x) }
+sub head (;$) { my $x = @_ == 0? $_: shift;	surf HEAD => ref $x? @{$x}: $x }
+sub get  (;$) { my $x = @_ == 0? $_: shift; surf GET => ref $x? @{$x}: $x }
+sub post (;$) { my $x = @_ == 0? $_: shift; surf POST => ref $x? @{$x}: $x }
+sub put  (;$) { my $x = @_ == 0? $_: shift; surf PUT => ref $x? @{$x}: $x }
+sub patch(;$) { my $x = @_ == 0? $_: shift; surf PATCH => ref $x? @{$x}: $x }
+sub del  (;$) { my $x = @_ == 0? $_: shift; surf DELETE => ref $x? @{$x}: $x }
 
 
 use config TELEGRAM_BOT_TOKEN => undef;
@@ -317,9 +337,48 @@ Aion::Surf - surfing by internet
 =head1 SYNOPSIS
 
 	use Aion::Surf;
-	use Test::Mock::LWP;
+	use common::sense;
 	
-	get "http://api.xyz"  # --> []
+	# mock
+	*LWP::UserAgent::request = sub {
+	    my ($ua, $request) = @_;
+	    my $response = HTTP::Response->new(200, "OK");
+	
+	    given ($request->method . " " . $request->uri) {
+	        $response->content("get")    when $_ eq "GET http://example/ex";
+	        $response->content("head")   when $_ eq "HEAD http://example/ex";
+	        $response->content("post")   when $_ eq "POST http://example/ex";
+	        $response->content("put")    when $_ eq "PUT http://example/ex";
+	        $response->content("patch")  when $_ eq "PATCH http://example/ex";
+	        $response->content("delete") when $_ eq "DELETE http://example/ex";
+	
+	        $response->content('{"a":10}')  when $_ eq "PATCH http://example/json";
+	        default {
+	            $response = HTTP::Response->new(404, "Not Found");
+	            $response->content("nf");
+	        }
+	    }
+	
+	    $response
+	};
+	
+	get "http://example/ex"             # => get
+	surf "http://example/ex"            # => get
+	
+	head "http://example/ex"            # -> 1
+	head "http://example/not-found"     # -> ""
+	
+	surf HEAD => "http://example/ex"    # -> 1
+	surf HEAD => "http://example/not-found"  # -> ""
+	
+	[map { surf $_ => "http://example/ex" } qw/GET HEAD POST PUT PATCH DELETE/] # --> [qw/get 1 post put patch delete/]
+	
+	patch "http://example/json" # --> {a => 10}
+	
+	[map patch, qw! http://example/ex http://example/json !]  # --> ["patch", {a => 10}]
+	
+	get ["http://example/ex", headers => {Accept => "*/*"}]  # => get
+	surf "http://example/ex", headers => [Accept => "*/*"]   # => get
 
 =head1 DESCRIPTION
 
@@ -336,8 +395,9 @@ Translate data to json format.
 	};
 	
 	my $result = '{
-	    "a": 10
-	}';
+	   "a": 10
+	}
+	';
 	
 	to_json $data # -> $result
 	
@@ -356,7 +416,7 @@ Escape scalar to part of url search.
 
 	to_url_param "a b" # => a+b
 	
-	[map to_url_param, "a b", "🦁"] # --> [qw/a+b %/]
+	[map to_url_param, "a b", "🦁"] # --> [qw/a+b %1F981/]
 
 =head2 to_url_params (;$hash_ref)
 
@@ -382,6 +442,7 @@ Generates the search part of the url.
 
 Parses and normalizes url.
 
+	use DDP; p my $x=parse_url "";
 	parse_url ""    # --> {}
 	
 	local $_ = ["/page", "https://main.com/pager/mix"];
@@ -396,66 +457,94 @@ Normalizes url.
 
 See also C<URI::URL>.
 
-=head2 surf (@params)
+=head2 surf ([$method], $url, @params)
 
 Send request by LWP::UserAgent and adapt response.
 
-	surf "https://ya.ru", cookie => {}  # -> .3
+C<@params> maybe:
+
+=over
+
+=item * C<query> - add query params to C<$url>.
+
+=item * C<json> - body request set in json format. Add header C<Content-Type: application/json; charset=utf-8>.
+
+=item * C<form> - body request set in url params format. Add header C<Content-Type: application/x-www-form-urlencoded>.
+
+=item * C<headers> - add headers. If C<header> is array ref, then add in the order specified. If C<header> is hash ref, then add in the alphabet order.
+
+=item * C<cookies> - add cookies. Same as: C<< cookies =E<gt> {go =E<gt> "xyz", session =E<gt> ["abcd", path =E<gt> "/page"]} >>.
+
+=item * C<response> - returns response (as HTTP::Response) by this reference.
+
+=back
+
+	my $req = "
+	";
+	
+	# mock
+	*LWP::UserAgent::request = sub {
+	    my ($ua, $request) = @_;
+	
+	    $request->as_string # -> $req
+	
+	    my $response = HTTP::Response->new(200, "OK");
+	    $response
+	};
+	
+	
+	my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
+	        'Accept' => '*/*,image/*',
+	    ],
+	    query => [x => 10, y => "🧨"],
+	    cookies => {
+	        go => "",
+	        session => ["abcd", path => "/page"],
+	    },
+	;
+	$res # -> .3
 
 =head2 head (;$)
 
-Check resurce in internet. Returns CL<HTTP::Request> if exists resurce in internet, otherwice returns C<undef>.
-
-	head "" # -> .3
+Check resurce in internet. Returns C<1> if exists resurce in internet, otherwice returns C<"">.
 
 =head2 get (;$url)
 
-Get resurce in internet.
-
-	get "http://127.0.0.1/" # -> .3
+Get content from resurce in internet.
 
 =head2 post (;$url)
 
-Add resurce in internet.
-
-	post ["", {a => 1, b => 2}] # -> .3
+Add content resurce in internet.
 
 =head2 put (;$url)
 
 Create or update resurce in internet.
 
-	put  # -> .3
-
 =head2 patch (;$url)
 
 Set attributes on resurce in internet.
-
-	my $aion_surf = Aion::Surf->new;
-	$aion_surf->patch  # -> .3
 
 =head2 del (;$url)
 
 Delete resurce in internet.
 
-	del "" # -> .3
-
 =head2 chat_message ($chat_id, $message)
 
 Sends a message to a telegram chat.
 
-	chat_message "ABCD", "hi!"  # -> .3
+	chat_message "ABCD", "hi!"  # => ok
 
 =head2 bot_message (;$message)
 
 Sends a message to a telegram bot.
 
-	bot_message "hi!" # -> .3
+	bot_message "hi!" # => ok
 
 =head2 tech_message (;$message)
 
 Sends a message to a technical telegram channel.
 
-	tech_message "hi!" # -> .3
+	tech_message "hi!" # => ok
 
 =head2 bot_update ()
 

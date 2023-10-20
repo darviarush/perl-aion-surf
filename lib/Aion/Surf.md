@@ -10,9 +10,48 @@ Aion::Surf - surfing by internet
 
 ```perl
 use Aion::Surf;
-use Test::Mock::LWP;
+use common::sense;
 
-get "http://api.xyz"  # --> []
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+    my $response = HTTP::Response->new(200, "OK");
+
+    given ($request->method . " " . $request->uri) {
+        $response->content("get")    when $_ eq "GET http://example/ex";
+        $response->content("head")   when $_ eq "HEAD http://example/ex";
+        $response->content("post")   when $_ eq "POST http://example/ex";
+        $response->content("put")    when $_ eq "PUT http://example/ex";
+        $response->content("patch")  when $_ eq "PATCH http://example/ex";
+        $response->content("delete") when $_ eq "DELETE http://example/ex";
+
+        $response->content('{"a":10}')  when $_ eq "PATCH http://example/json";
+        default {
+            $response = HTTP::Response->new(404, "Not Found");
+            $response->content("nf");
+        }
+    }
+
+    $response
+};
+
+get "http://example/ex"             # => get
+surf "http://example/ex"            # => get
+
+head "http://example/ex"            # -> 1
+head "http://example/not-found"     # -> ""
+
+surf HEAD => "http://example/ex"    # -> 1
+surf HEAD => "http://example/not-found"  # -> ""
+
+[map { surf $_ => "http://example/ex" } qw/GET HEAD POST PUT PATCH DELETE/] # --> [qw/get 1 post put patch delete/]
+
+patch "http://example/json" # --> {a => 10}
+
+[map patch, qw! http://example/ex http://example/json !]  # --> ["patch", {a => 10}]
+
+get ["http://example/ex", headers => {Accept => "*/*"}]  # => get
+surf "http://example/ex", headers => [Accept => "*/*"]   # => get
 ```
 
 # DESCRIPTION
@@ -31,8 +70,9 @@ my $data = {
 };
 
 my $result = '{
-    "a": 10
-}';
+   "a": 10
+}
+';
 
 to_json $data # -> $result
 
@@ -55,7 +95,7 @@ Escape scalar to part of url search.
 ```perl
 to_url_param "a b" # => a+b
 
-[map to_url_param, "a b", "🦁"] # --> [qw/a+b %/]
+[map to_url_param, "a b", "🦁"] # --> [qw/a+b %1F981/]
 ```
 
 ## to_url_params (;$hash_ref)
@@ -80,9 +120,27 @@ to_url_params {k => "", n => undef, f => 1}  # => f&k=
 Parses and normalizes url.
 
 ```perl
-parse_url ""    # --> {}
+use DDP; p my $x=parse_url "";
+
+my $res = {
+    dom    => "off",
+    domen  => "off",
+    link   => "off://off/",
+    orig   => "",
+    proto  => "off",
+};
+
+parse_url ""    # --> $res
 
 local $_ = ["/page", "https://main.com/pager/mix"];
+$res = {
+    dom    => "off",
+    domen  => "off",
+    link   => "off://off/",
+    orig   => "",
+    proto  => "off",
+};
+parse_url    # --> $res
 ```
 
 See also `URL::XS`.
@@ -97,69 +155,76 @@ normalize_url ""  # -> .3
 
 See also `URI::URL`.
 
-## surf (@params)
+## surf ([$method], $url, @params)
 
 Send request by LWP::UserAgent and adapt response.
 
+`@params` maybe:
+
+* `query` - add query params to `$url`.
+* `json` - body request set in json format. Add header `Content-Type: application/json; charset=utf-8`.
+* `form` - body request set in url params format. Add header `Content-Type: application/x-www-form-urlencoded`.
+* `headers` - add headers. If `header` is array ref, then add in the order specified. If `header` is hash ref, then add in the alphabet order.
+* `cookies` - add cookies. Same as: `cookies => {go => "xyz", session => ["abcd", path => "/page"]}`.
+* `response` - returns response (as HTTP::Response) by this reference.
+
 ```perl
-surf "https://ya.ru", cookie => {}  # -> .3
+my $req = "
+";
+
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+
+    $request->as_string # -> $req
+
+    my $response = HTTP::Response->new(200, "OK");
+    $response
+};
+
+
+my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
+        'Accept' => '*/*,image/*',
+    ],
+    query => [x => 10, y => "🧨"],
+    cookies => {
+        go => "",
+        session => ["abcd", path => "/page"],
+    },
+;
+$res # -> .3
 ```
 
 ## head (;$)
 
-Check resurce in internet. Returns `HTTP::Request` if exists resurce in internet, otherwice returns `undef`.
-
-```perl
-head "" # -> .3
-```
+Check resurce in internet. Returns `1` if exists resurce in internet, otherwice returns `""`.
 
 ## get (;$url)
 
-Get resurce in internet.
-
-```perl
-get "http://127.0.0.1/" # -> .3
-```
+Get content from resurce in internet.
 
 ## post (;$url)
 
-Add resurce in internet.
-
-```perl
-post ["", {a => 1, b => 2}] # -> .3
-```
+Add content resurce in internet.
 
 ## put (;$url)
 
 Create or update resurce in internet.
 
-```perl
-put  # -> .3
-```
-
 ## patch (;$url)
 
 Set attributes on resurce in internet.
 
-```perl
-my $aion_surf = Aion::Surf->new;
-$aion_surf->patch  # -> .3
-```
-
 ## del (;$url)
 
 Delete resurce in internet.
-
-```perl
-del "" # -> .3
-```
 
 ## chat_message ($chat_id, $message)
 
 Sends a message to a telegram chat.
 
 ```perl
-chat_message "ABCD", "hi!"  # -> .3
+chat_message "ABCD", "hi!"  # => ok
 ```
 
 ## bot_message (;$message)
@@ -167,7 +232,7 @@ chat_message "ABCD", "hi!"  # -> .3
 Sends a message to a telegram bot.
 
 ```perl
-bot_message "hi!" # -> .3
+bot_message "hi!" # => ok
 ```
 
 ## tech_message (;$message)
@@ -175,7 +240,7 @@ bot_message "hi!" # -> .3
 Sends a message to a technical telegram channel.
 
 ```perl
-tech_message "hi!" # -> .3
+tech_message "hi!" # => ok
 ```
 
 ## bot_update ()
