@@ -120,10 +120,43 @@ done_testing; }; subtest 'to_url_params (;$hash_ref)' => sub {
 # Parses and normalizes url.
 # 
 done_testing; }; subtest 'parse_url (;$url)' => sub { 
-use DDP; p my $x=parse_url "";
-::is_deeply scalar do {parse_url ""}, scalar do {{}}, 'parse_url ""    # --> {}';
+my $res = {
+    dom    => "off",
+    domen  => "off",
+    link   => "off://off/",
+    orig   => "",
+    proto  => "off",
+};
 
-local $_ = ["/page", "https://main.com/pager/mix"];
+::is_deeply scalar do {parse_url ""}, scalar do {$res}, 'parse_url ""    # --> $res';
+
+local $_ = ["/page", "https://www.main.com/pager/mix"];
+$res = {
+    proto  => "https",
+    dom    => "www.main.com",
+    domen  => "main.com",
+    link   => "https://www.main.com/page",
+    path   => "/page",
+    dir    => "/page/",
+    orig   => "/page",
+};
+
+::is_deeply scalar do {parse_url}, scalar do {$res}, 'parse_url    # --> $res';
+
+$res = {
+    proto  => "https",
+    user   => "user",
+    pass   => "pass",
+    dom    => "www.x.test",
+    domen  => "x.test",
+    path   => "/path",
+    dir    => "/path/",
+    query  => "x=10&y=20",
+    hash   => "hash",
+    link   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+    orig   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+};
+::is_deeply scalar do {parse_url 'https://user:pass@www.x.test/path?x=10&y=20#hash'}, scalar do {$res}, 'parse_url \'https://user:pass@www.x.test/path?x=10&y=20#hash\'  # --> $res';
 
 # 
 # See also `URL::XS`.
@@ -133,12 +166,23 @@ local $_ = ["/page", "https://main.com/pager/mix"];
 # Normalizes url.
 # 
 done_testing; }; subtest 'normalize_url (;$url)' => sub { 
-::is scalar do {normalize_url ""}, scalar do{.3}, 'normalize_url ""  # -> .3';
+::is scalar do {normalize_url ""}, "off://off", 'normalize_url ""  # => off://off';
+::is scalar do {normalize_url "www.fix.com"}, "off://off/www.fix.com", 'normalize_url "www.fix.com"  # => off://off/www.fix.com';
+::is scalar do {normalize_url ":"}, "off://off/:", 'normalize_url ":"  # => off://off/:';
+::is scalar do {normalize_url '@'}, "off://off/@", 'normalize_url \'@\'  # => off://off/@';
+::is scalar do {normalize_url "/"}, "off://off", 'normalize_url "/"  # => off://off';
+::is scalar do {normalize_url "//"}, "off://off", 'normalize_url "//" # => off://off';
+::is scalar do {normalize_url "?"}, "off://off", 'normalize_url "?"  # => off://off';
+::is scalar do {normalize_url "#"}, "off://off", 'normalize_url "#"  # => off://off';
+
+::is scalar do {normalize_url "dir/file", "http://www.load.er/fix/mix"}, "http://load.er/dir/file", 'normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file';
+::is scalar do {normalize_url "?x", "http://load.er/fix/mix?y=6"}, "http://load.er/fix/mix/bp/file", 'normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix/bp/file';
+die "===== OK! =====";
 
 # 
 # See also `URI::URL`.
 # 
-# ## surf ([$method], $url, @params)
+# ## surf (\[$method], $url, \[$data], %params)
 # 
 # Send request by LWP::UserAgent and adapt response.
 # 
@@ -151,7 +195,7 @@ done_testing; }; subtest 'normalize_url (;$url)' => sub {
 # * `cookies` - add cookies. Same as: `cookies => {go => "xyz", session => ["abcd", path => "/page"]}`.
 # * `response` - returns response (as HTTP::Response) by this reference.
 # 
-done_testing; }; subtest 'surf ([$method], $url, @params)' => sub { 
+done_testing; }; subtest 'surf (\[$method], $url, \[$data], %params)' => sub { 
 my $req = "
 ";
 

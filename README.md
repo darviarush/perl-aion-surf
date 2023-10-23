@@ -120,10 +120,43 @@ to_url_params {k => "", n => undef, f => 1}  # => f&k=
 Parses and normalizes url.
 
 ```perl
-use DDP; p my $x=parse_url "";
-parse_url ""    # --> {}
+my $res = {
+    dom    => "off",
+    domen  => "off",
+    link   => "off://off/",
+    orig   => "",
+    proto  => "off",
+};
 
-local $_ = ["/page", "https://main.com/pager/mix"];
+parse_url ""    # --> $res
+
+local $_ = ["/page", "https://www.main.com/pager/mix"];
+$res = {
+    proto  => "https",
+    dom    => "www.main.com",
+    domen  => "main.com",
+    link   => "https://www.main.com/page",
+    path   => "/page",
+    dir    => "/page/",
+    orig   => "/page",
+};
+
+parse_url    # --> $res
+
+$res = {
+    proto  => "https",
+    user   => "user",
+    pass   => "pass",
+    dom    => "www.x.test",
+    domen  => "x.test",
+    path   => "/path",
+    dir    => "/path/",
+    query  => "x=10&y=20",
+    hash   => "hash",
+    link   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+    orig   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+};
+parse_url 'https://user:pass@www.x.test/path?x=10&y=20#hash'  # --> $res
 ```
 
 See also `URL::XS`.
@@ -133,12 +166,23 @@ See also `URL::XS`.
 Normalizes url.
 
 ```perl
-normalize_url ""  # -> .3
+normalize_url ""  # => off://off
+normalize_url "www.fix.com"  # => off://off/www.fix.com
+normalize_url ":"  # => off://off/:
+normalize_url '@'  # => off://off/@
+normalize_url "/"  # => off://off
+normalize_url "//" # => off://off
+normalize_url "?"  # => off://off
+normalize_url "#"  # => off://off
+
+normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file
+normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix/bp/file
+die "===== OK! =====";
 ```
 
 See also `URI::URL`.
 
-## surf ([$method], $url, @params)
+## surf (\[$method], $url, \[$data], %params)
 
 Send request by LWP::UserAgent and adapt response.
 

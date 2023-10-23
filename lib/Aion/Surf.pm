@@ -81,20 +81,28 @@ sub parse_url(;$) {
 	my $orig = $link;
 
 	# Если ссылка не абсолютная — подставляем протокол
-	if($link =~ m!^//!) { $link = $onpage =~ m!^(\w+:)//[^/?#]!? "$1$link": die "\$onpage — не url, а „${onpage}”" }
+	if($link =~ m!^//([^/?#])?!) {
+		my $is_domen = defined $1; my $last = $';
+		$link = $onpage =~ m!^(\w+:)(//[^/?#]+)!
+			? join("", $1, $is_domen? $link: ($2, $last))
+			: die "onpage: \$onpage — not url, but „${onpage}”"
+	}
 	elsif($link =~ m!^/!) { # Подставляем протокол и домен
-		$link = $onpage =~ m!^\w+://[^/?#]+!? "$&$link": die "\$onpage — не url, а „${onpage}”";
+		$link = $onpage =~ m!^\w+://[^/?#]+!? "$&$link": die "onpage: \$onpage — not url, but „${onpage}”";
 	} elsif($link !~ m!^\w+://!) { # Подставляем после директории
-		$link = $onpage =~ m!^\w+://[^/?#]+(/([^?#]*/)?)?!? $& . do {$& !~ m!/\z!? "/": ""} . $link: die "\$onpage — не url, а „${onpage}”";
+		$link = $onpage =~ m!^\w+://[^/?#]+(/([^?#]*/)?)?!? $& . do {$& !~ m!/\z!? "/": ""} . $link: die "onpage: \$onpage — not url, but „${onpage}”";
 	}
 
 	$link =~ m!^
-		(?<proto> \w+ ) ://
-		(?<dom> [^/?\#]+ )
+		( (?<proto> \w+ ) : )?
+		( //
+			( (?<user> [^:/?\#\@]* ) :
+		  	  (?<pass> [^/?\#\@]*  ) \@ )?
+		(?<dom> [^/?\#]+ ) )?
 		(  / (?<path>  [^?\#]* ) )?
 		( \? (?<query> [^\#]*  ) )?
-		( \# (?<hash>  .*	  ) )?
-	\z!xn || die "Ссылка „$link” — не url!";
+		( \# (?<hash>  .*	   ) )?
+	\z!xn || die "Link „$link” — not url!";
 
 	my $x = {%+, orig => $orig, link => $link};
 
@@ -102,6 +110,7 @@ sub parse_url(;$) {
 	$x->{proto} = lc $x->{proto};
 	$x->{dom} = lc $x->{dom};
 	$x->{domen} = $x->{dom} =~ s/^www\.//r;
+	$x->{path} = lc $x->{path};
 
 	my @path = split m!/!, $x->{path}; my @p;
 
@@ -122,8 +131,8 @@ sub parse_url(;$) {
 			$x->{dir} = $`;
 			$x->{file} = $&;
 		} else {
-			$x->{path} .= "/";
-			$x->{dir} = $x->{path};
+			$x->{path};
+			$x->{dir} = "$x->{path}/";
 		}
 	} else { delete $x->{path} }
 
@@ -136,7 +145,7 @@ sub normalize_url(;$) {
 	my $onpage;
 	($link, $onpage) = @$link if ref $link eq "ARRAY";
 	my $x = ref $link? $link: parse_url $link, $onpage;
-	join "", $x->{proto}, "://", $x->{domen}, $x->{path}, exists $x->{query}? ("?", $x->{query}): (), exists $x->{hash}? ("#", $x->{hash}): ();
+	join "", $x->{proto}, "://", $x->{domen}, $x->{path}, length($x->{query})? ("?", $x->{query}): (), length($x->{hash})? ("#", $x->{hash}): ();
 }
 
 #@category surf
@@ -442,10 +451,43 @@ Generates the search part of the url.
 
 Parses and normalizes url.
 
-	use DDP; p my $x=parse_url "";
-	parse_url ""    # --> {}
+	my $res = {
+	    dom    => "off",
+	    domen  => "off",
+	    link   => "off://off/",
+	    orig   => "",
+	    proto  => "off",
+	};
 	
-	local $_ = ["/page", "https://main.com/pager/mix"];
+	parse_url ""    # --> $res
+	
+	local $_ = ["/page", "https://www.main.com/pager/mix"];
+	$res = {
+	    proto  => "https",
+	    dom    => "www.main.com",
+	    domen  => "main.com",
+	    link   => "https://www.main.com/page",
+	    path   => "/page",
+	    dir    => "/page/",
+	    orig   => "/page",
+	};
+	
+	parse_url    # --> $res
+	
+	$res = {
+	    proto  => "https",
+	    user   => "user",
+	    pass   => "pass",
+	    dom    => "www.x.test",
+	    domen  => "x.test",
+	    path   => "/path",
+	    dir    => "/path/",
+	    query  => "x=10&y=20",
+	    hash   => "hash",
+	    link   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+	    orig   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+	};
+	parse_url 'https://user:pass@www.x.test/path?x=10&y=20#hash'  # --> $res
 
 See also C<URL::XS>.
 
@@ -453,11 +495,22 @@ See also C<URL::XS>.
 
 Normalizes url.
 
-	normalize_url ""  # -> .3
+	normalize_url ""  # => off://off
+	normalize_url "www.fix.com"  # => off://off/www.fix.com
+	normalize_url ":"  # => off://off/:
+	normalize_url '@'  # => off://off/@
+	normalize_url "/"  # => off://off
+	normalize_url "//" # => off://off
+	normalize_url "?"  # => off://off
+	normalize_url "#"  # => off://off
+	
+	normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file
+	normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix/bp/file
+	die "===== OK! =====";
 
 See also C<URI::URL>.
 
-=head2 surf ([$method], $url, @params)
+=head2 surf ([$method], $url, [$data], %params)
 
 Send request by LWP::UserAgent and adapt response.
 
