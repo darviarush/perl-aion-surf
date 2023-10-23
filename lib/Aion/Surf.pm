@@ -72,6 +72,22 @@ sub to_url_params(;$) {
 
 #@category parse url
 
+sub _parse_url ($) {
+	my ($link) = @_;
+	$link =~ m!^
+		(?: (?<proto> \w+ ) : )?
+		(?: //
+			(?: (?<user> [^:/?\#\@]* ) :
+		  	  (?<pass> [^/?\#\@]*  ) \@  )?
+			(?<dom> [^/?\#]* )             )?
+		(?:  / (?<path>  [^?\#]* ) )?
+		(?<part> [^?\#]+ )?
+		(?: \? (?<query> [^\#]*  ) )?
+		(?: \# (?<hash>  .*	   ) )?
+	\z!x or die "not link: $link";
+	return %+;
+}
+
 # Парсит и нормализует url
 sub parse_url(;$) {
 	my ($link) = @_ == 0? $_: @_;
@@ -80,39 +96,36 @@ sub parse_url(;$) {
 	$onpage //= "off://off";
 	my $orig = $link;
 
-	# Если ссылка не абсолютная — подставляем протокол
-	if($link =~ m!^//([^/?#])?!) {
-		my $is_domen = defined $1; my $last = $';
-		$link = $onpage =~ m!^(\w+:)(//[^/?#]+)!
-			? join("", $1, $is_domen? $link: ($2, $last))
-			: die "onpage: \$onpage — not url, but „${onpage}”"
-	}
-	elsif($link =~ m!^/!) { # Подставляем протокол и домен
-		$link = $onpage =~ m!^\w+://[^/?#]+!? "$&$link": die "onpage: \$onpage — not url, but „${onpage}”";
-	} elsif($link !~ m!^\w+://!) { # Подставляем после директории
-		$link = $onpage =~ m!^\w+://[^/?#]+(/([^?#]*/)?)?!? $& . do {$& !~ m!/\z!? "/": ""} . $link: die "onpage: \$onpage — not url, but „${onpage}”";
+	my %link = _parse_url $link;
+	my %onpage = _parse_url $onpage;
+
+	if(exists $link{part}) {
+		$link{path} = $onpage{path} =~ m!/\z!? "$onpage{path}$link{part}": "$onpage{path}/$link{part}";
+		delete $link{part};
 	}
 
-	$link =~ m!^
-		( (?<proto> \w+ ) : )?
-		( //
-			( (?<user> [^:/?\#\@]* ) :
-		  	  (?<pass> [^/?\#\@]*  ) \@ )?
-		(?<dom> [^/?\#]+ ) )?
-		(  / (?<path>  [^?\#]* ) )?
-		( \? (?<query> [^\#]*  ) )?
-		( \# (?<hash>  .*	   ) )?
-	\z!xn || die "Link „$link” — not url!";
-
-	my $x = {%+, orig => $orig, link => $link};
+	if(exists $link{dom}) {
+		$link{proto} //= $onpage{proto};
+	}
+	elsif(exists $link{path}) {
+		$link{proto} //= $onpage{proto};
+		if(!exists $link{dom}) {
+			$link{user} = $onpage{user} if exists $onpage{user};
+			$link{pass} = $onpage{pass} if exists $onpage{pass};
+			$link{dom} = $onpage{dom};
+		}
+	}
+	else {
+		%link = (%onpage, %link);
+	}
 
 	# нормализуем
-	$x->{proto} = lc $x->{proto};
-	$x->{dom} = lc $x->{dom};
-	$x->{domen} = $x->{dom} =~ s/^www\.//r;
-	$x->{path} = lc $x->{path};
+	$link{proto} = lc $link{proto};
+	$link{dom} = lc $link{dom};
+	$link{domen} = $link{dom} =~ s/^www\.//r;
+	$link{path} = lc $link{path};
 
-	my @path = split m!/!, $x->{path}; my @p;
+	my @path = split m!/!, $link{path}; my @p;
 
 	for my $p (@path) {
 		if($p eq ".") {}
@@ -126,17 +139,17 @@ sub parse_url(;$) {
 	@p = grep { $_ ne "" } @p;
 
 	if(@p) {
-		$x->{path} = join "/", "", @p;
-		if($x->{path} =~ m![^/]*\.[^/]*\z!) {
-			$x->{dir} = $`;
-			$x->{file} = $&;
+		$link{path} = join "/", "", @p;
+		if($link{path} =~ m![^/]*\.[^/]*\z!) {
+			$link{dir} = $`;
+			$link{file} = $&;
 		} else {
-			$x->{path};
-			$x->{dir} = "$x->{path}/";
+			$link{path};
+			$link{dir} = "$link{path}/";
 		}
-	} else { delete $x->{path} }
+	} else { delete $link{path} }
 
-	return $x;
+	return \%link;
 }
 
 # Нормализует url
