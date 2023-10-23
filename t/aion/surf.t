@@ -115,33 +115,34 @@ done_testing; }; subtest 'to_url_params (;$hash_ref)' => sub {
 ::is scalar do {to_url_params {k => "", n => undef, f => 1}}, "f&k=", 'to_url_params {k => "", n => undef, f => 1}  # => f&k=';
 
 # 
-# ## parse_url (;$url)
+# ## parse_url ($url, $onpage)
 # 
 # Parses and normalizes url.
 # 
-done_testing; }; subtest 'parse_url (;$url)' => sub { 
+done_testing; }; subtest 'parse_url ($url, $onpage)' => sub { 
 my $res = {
+    proto  => "off",
     dom    => "off",
     domen  => "off",
-    link   => "off://off/",
+    link   => "off://off",
     orig   => "",
-    proto  => "off",
+    onpage => "off://off",
 };
 
 ::is_deeply scalar do {parse_url ""}, scalar do {$res}, 'parse_url ""    # --> $res';
 
-local $_ = ["/page", "https://www.main.com/pager/mix"];
 $res = {
     proto  => "https",
     dom    => "www.main.com",
     domen  => "main.com",
-    link   => "https://www.main.com/page",
     path   => "/page",
     dir    => "/page/",
+    link   => "https://main.com/page",
     orig   => "/page",
+    onpage => "https://www.main.com/pager/mix",
 };
 
-::is_deeply scalar do {parse_url}, scalar do {$res}, 'parse_url    # --> $res';
+::is_deeply scalar do {parse_url "/page", "https://www.main.com/pager/mix"}, scalar do {$res}, 'parse_url "/page", "https://www.main.com/pager/mix"   # --> $res';
 
 $res = {
     proto  => "https",
@@ -153,31 +154,32 @@ $res = {
     dir    => "/path/",
     query  => "x=10&y=20",
     hash   => "hash",
-    link   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+    link   => 'https://user:pass@x.test/path?x=10&y=20#hash',
     orig   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+    onpage => "off://off",
 };
 ::is_deeply scalar do {parse_url 'https://user:pass@www.x.test/path?x=10&y=20#hash'}, scalar do {$res}, 'parse_url \'https://user:pass@www.x.test/path?x=10&y=20#hash\'  # --> $res';
 
 # 
 # See also `URL::XS`.
 # 
-# ## normalize_url (;$url)
+# ## normalize_url ($url, $onpage)
 # 
 # Normalizes url.
 # 
-done_testing; }; subtest 'normalize_url (;$url)' => sub { 
-::is scalar do {normalize_url ""}, "off://off", 'normalize_url ""  # => off://off';
+done_testing; }; subtest 'normalize_url ($url, $onpage)' => sub { 
+::is scalar do {normalize_url ""}, "off://off", 'normalize_url ""   # => off://off';
 ::is scalar do {normalize_url "www.fix.com"}, "off://off/www.fix.com", 'normalize_url "www.fix.com"  # => off://off/www.fix.com';
 ::is scalar do {normalize_url ":"}, "off://off/:", 'normalize_url ":"  # => off://off/:';
 ::is scalar do {normalize_url '@'}, "off://off/@", 'normalize_url \'@\'  # => off://off/@';
 ::is scalar do {normalize_url "/"}, "off://off", 'normalize_url "/"  # => off://off';
-::is scalar do {normalize_url "//"}, "off://off", 'normalize_url "//" # => off://off';
+::is scalar do {normalize_url "//"}, "off://", 'normalize_url "//" # => off://';
 ::is scalar do {normalize_url "?"}, "off://off", 'normalize_url "?"  # => off://off';
 ::is scalar do {normalize_url "#"}, "off://off", 'normalize_url "#"  # => off://off';
 
-::is scalar do {normalize_url "dir/file", "http://www.load.er/fix/mix"}, "http://load.er/dir/file", 'normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file';
-::is scalar do {normalize_url "?x", "http://load.er/fix/mix?y=6"}, "http://load.er/fix/mix/bp/file", 'normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix/bp/file';
-die "===== OK! =====";
+::is scalar do {normalize_url "/dir/file", "http://www.load.er/fix/mix"}, "http://load.er/dir/file", 'normalize_url "/dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file';
+::is scalar do {normalize_url "dir/file", "http://www.load.er/fix/mix"}, "http://load.er/fix/mix/dir/file", 'normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/fix/mix/dir/file';
+::is scalar do {normalize_url "?x", "http://load.er/fix/mix?y=6"}, "http://load.er/fix/mix?x", 'normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix?x';
 
 # 
 # See also `URI::URL`.

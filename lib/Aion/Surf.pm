@@ -59,7 +59,12 @@ sub _escape_url_params {
 sub to_url_params(;$) {
 	my ($param) = @_ == 0? $_: @_;
 
-	join "&", map _escape_url_params($_, $param->{$_}), sort keys %$param
+	if(ref $param eq "HASH") {
+		join "&", map _escape_url_params($_, $param->{$_}), sort keys %$param
+	}
+	else {
+		join "&", pairmap { _escape_url_params($a, $b) } @$param
+	}
 }
 
 # #@see https://habr.com/ru/articles/63432/
@@ -75,25 +80,28 @@ sub to_url_params(;$) {
 sub _parse_url ($) {
 	my ($link) = @_;
 	$link =~ m!^
-		(?: (?<proto> \w+ ) : )?
-		(?: //
-			(?: (?<user> [^:/?\#\@]* ) :
+		( (?<proto> \w+ ) : )?
+		( //
+			( (?<user> [^:/?\#\@]* ) :
 		  	  (?<pass> [^/?\#\@]*  ) \@  )?
 			(?<dom> [^/?\#]* )             )?
-		(?:  / (?<path>  [^?\#]* ) )?
+		(  / (?<path>  [^?\#]* ) )?
 		(?<part> [^?\#]+ )?
-		(?: \? (?<query> [^\#]*  ) )?
-		(?: \# (?<hash>  .*	   ) )?
-	\z!x or die "not link: $link";
+		( \? (?<query> [^\#]*  ) )?
+		( \# (?<hash>  .*	   ) )?
+	\z!xn;
 	return %+;
 }
 
+# 1 - set / in each page, if it not file (*.*), or 0 - unset
+use config DIR => 0;
+use config ONPAGE => "off://off";
+
 # Парсит и нормализует url
-sub parse_url(;$) {
-	my ($link) = @_ == 0? $_: @_;
-	my $onpage;
-	($link, $onpage) = @$link if ref $link eq "ARRAY";
-	$onpage //= "off://off";
+sub parse_url($;$$) {
+	my ($link, $onpage, $dir) = @_;
+	$onpage //= ONPAGE;
+	$dir //= DIR;
 	my $orig = $link;
 
 	my %link = _parse_url $link;
@@ -143,29 +151,37 @@ sub parse_url(;$) {
 		if($link{path} =~ m![^/]*\.[^/]*\z!) {
 			$link{dir} = $`;
 			$link{file} = $&;
+		} elsif($dir) {
+			$link{path} = $link{dir} = "$link{path}/";
 		} else {
-			$link{path};
 			$link{dir} = "$link{path}/";
 		}
 	} else { delete $link{path} }
+
+	$link{orig} = $orig;
+	$link{onpage} = $onpage;
+	$link{link} = join "", $link{proto}, "://",
+		exists $link{user} || exists $link{pass}? ($link{user},
+			exists $link{pass}? ":$link{pass}": (), '@'): (),
+		$link{domen},
+		$link{path},
+		length($link{query})? ("?", $link{query}): (),
+		length($link{hash})? ("#", $link{hash}): (),
+	;
 
 	return \%link;
 }
 
 # Нормализует url
-sub normalize_url(;$) {
-	my ($link) = @_ == 0? $_: @_;
-	my $onpage;
-	($link, $onpage) = @$link if ref $link eq "ARRAY";
-	my $x = ref $link? $link: parse_url $link, $onpage;
-	join "", $x->{proto}, "://", $x->{domen}, $x->{path}, length($x->{query})? ("?", $x->{query}): (), length($x->{hash})? ("#", $x->{hash}): ();
+sub normalize_url($;$) {
+	parse_url($_[0], $_[1])->{link}
 }
 
 #@category surf
 
 use config TIMEOUT => 10;
 use config FROM_IP => undef;
-use config AGENT => q{Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36 OPR/92.0.0.0};
+use config AGENT => q{Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15};
 
 our $ua = LWP::UserAgent->new;
 $ua->agent(AGENT);
@@ -460,32 +476,33 @@ Generates the search part of the url.
 
 	to_url_params {k => "", n => undef, f => 1}  # => f&k=
 
-=head2 parse_url (;$url)
+=head2 parse_url ($url, $onpage)
 
 Parses and normalizes url.
 
 	my $res = {
+	    proto  => "off",
 	    dom    => "off",
 	    domen  => "off",
-	    link   => "off://off/",
+	    link   => "off://off",
 	    orig   => "",
-	    proto  => "off",
+	    onpage => "off://off",
 	};
 	
 	parse_url ""    # --> $res
 	
-	local $_ = ["/page", "https://www.main.com/pager/mix"];
 	$res = {
 	    proto  => "https",
 	    dom    => "www.main.com",
 	    domen  => "main.com",
-	    link   => "https://www.main.com/page",
 	    path   => "/page",
 	    dir    => "/page/",
+	    link   => "https://main.com/page",
 	    orig   => "/page",
+	    onpage => "https://www.main.com/pager/mix",
 	};
 	
-	parse_url    # --> $res
+	parse_url "/page", "https://www.main.com/pager/mix"   # --> $res
 	
 	$res = {
 	    proto  => "https",
@@ -497,29 +514,30 @@ Parses and normalizes url.
 	    dir    => "/path/",
 	    query  => "x=10&y=20",
 	    hash   => "hash",
-	    link   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+	    link   => 'https://user:pass@x.test/path?x=10&y=20#hash',
 	    orig   => 'https://user:pass@www.x.test/path?x=10&y=20#hash',
+	    onpage => "off://off",
 	};
 	parse_url 'https://user:pass@www.x.test/path?x=10&y=20#hash'  # --> $res
 
 See also C<URL::XS>.
 
-=head2 normalize_url (;$url)
+=head2 normalize_url ($url, $onpage)
 
 Normalizes url.
 
-	normalize_url ""  # => off://off
+	normalize_url ""   # => off://off
 	normalize_url "www.fix.com"  # => off://off/www.fix.com
 	normalize_url ":"  # => off://off/:
 	normalize_url '@'  # => off://off/@
 	normalize_url "/"  # => off://off
-	normalize_url "//" # => off://off
+	normalize_url "//" # => off://
 	normalize_url "?"  # => off://off
 	normalize_url "#"  # => off://off
 	
-	normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file
-	normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix/bp/file
-	die "===== OK! =====";
+	normalize_url "/dir/file", "http://www.load.er/fix/mix"  # => http://load.er/dir/file
+	normalize_url "dir/file", "http://www.load.er/fix/mix"  # => http://load.er/fix/mix/dir/file
+	normalize_url "?x", "http://load.er/fix/mix?y=6"  # => http://load.er/fix/mix?x
 
 See also C<URI::URL>.
 
