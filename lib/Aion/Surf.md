@@ -86,6 +86,8 @@ Parse string in json format to perl structure.
 
 ```perl
 from_json '{"a": 10}' # --> {a => 10}
+
+[map from_json, "{}", "2"]  # --> [{}, 2]
 ```
 
 ## to_url_param (;$scalar)
@@ -103,7 +105,8 @@ to_url_param "a b" # => a+b
 Generates the search part of the url.
 
 ```perl
-to_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
+local $_ = {a => 1, b => [[1,2],3,{x=>10}]};
+to_url_params  # => a&b[][]&b[][]=2&b[]=3&b[][x]=10
 ```
 
 1. Keys with undef values not stringify.
@@ -115,15 +118,19 @@ to_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
 to_url_params {k => "", n => undef, f => 1}  # => f&k=
 ```
 
-## parse_url ($url, $onpage)
+## parse_url ($url, $onpage, $dir)
 
 Parses and normalizes url.
+
+* `$url` — url, or it part for parsing.
+* `$onpage` — url page with `$url`. If `$url` not complete, then extended it. Optional. By default use config ONPAGE = "off://off".
+* `$dir` (bool): 1 — normalize url path with "/" on end, if it is catalog. 0 — without "/".
 
 ```perl
 my $res = {
     proto  => "off",
     dom    => "off",
-    domen  => "off",
+    domain => "off",
     link   => "off://off",
     orig   => "",
     onpage => "off://off",
@@ -133,8 +140,8 @@ parse_url ""    # --> $res
 
 $res = {
     proto  => "https",
-    dom    => "www.main.com",
-    domen  => "main.com",
+    dom    => "main.com",
+    domain => "www.main.com",
     path   => "/page",
     dir    => "/page/",
     link   => "https://main.com/page",
@@ -148,8 +155,8 @@ $res = {
     proto  => "https",
     user   => "user",
     pass   => "pass",
-    dom    => "www.x.test",
-    domen  => "x.test",
+    dom    => "x.test",
+    domain => "www.x.test",
     path   => "/path",
     dir    => "/path/",
     query  => "x=10&y=20",
@@ -163,9 +170,11 @@ parse_url 'https://user:pass@www.x.test/path?x=10&y=20#hash'  # --> $res
 
 See also `URL::XS`.
 
-## normalize_url ($url, $onpage)
+## normalize_url ($url, $onpage, $dir)
 
 Normalizes url.
+
+It use `parse_url`, and it returns link.
 
 ```perl
 normalize_url ""   # => off://off
@@ -198,33 +207,45 @@ Send request by LWP::UserAgent and adapt response.
 * `response` - returns response (as HTTP::Response) by this reference.
 
 ```perl
-my $req = "
+my $req = "MAYBE_ANY_METHOD https://ya.ru/page?z=30&x=10&y=%1F9E8
+Accept: */*,image/*
+Content-Type: application/x-www-form-urlencoded
+
+x&y=2
 ";
+
+my $req_cookies = 'Set-Cookie3: go=""; path="/"; domain=ya.ru; version=0
+Set-Cookie3: session=%1F9E8; path="/page"; domain=ya.ru; version=0
+';
 
 # mock
 *LWP::UserAgent::request = sub {
     my ($ua, $request) = @_;
 
     $request->as_string # -> $req
+    $ua->cookie_jar->as_string  # -> $req_cookies
 
     my $response = HTTP::Response->new(200, "OK");
+    $response->content(3.14);
     $response
 };
 
-
-my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
+my $res = surf MAYBE_ANY_METHOD => "https://ya.ru/page?z=30", [x => 1, y => 2, z => undef],
+    headers => [
         'Accept' => '*/*,image/*',
     ],
     query => [x => 10, y => "🧨"],
+    response => \my $response,
     cookies => {
         go => "",
-        session => ["abcd", path => "/page"],
+        session => ["🧨", path => "/page"],
     },
 ;
-$res # -> .3
+$res           # -> 3.14
+ref $response  # => HTTP::Response
 ```
 
-## head (;$)
+## head (;$url)
 
 Check resurce in internet. Returns `1` if exists resurce in internet, otherwice returns `""`.
 
@@ -232,15 +253,15 @@ Check resurce in internet. Returns `1` if exists resurce in internet, otherwice 
 
 Get content from resurce in internet.
 
-## post (;$url)
+## post (;$url, \[$headers_href], %params)
 
 Add content resurce in internet.
 
-## put (;$url)
+## put (;$url, \[$headers_href], %params)
 
 Create or update resurce in internet.
 
-## patch (;$url)
+## patch (;$url, \[$headers_href], %params)
 
 Set attributes on resurce in internet.
 
@@ -253,7 +274,13 @@ Delete resurce in internet.
 Sends a message to a telegram chat.
 
 ```perl
-chat_message "ABCD", "hi!"  # => ok
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+    HTTP::Response->new(200, "OK", undef, to_json {ok => 1});
+};
+
+chat_message "ABCD", "hi!"  # --> {ok => 1}
 ```
 
 ## bot_message (;$message)
@@ -261,7 +288,7 @@ chat_message "ABCD", "hi!"  # => ok
 Sends a message to a telegram bot.
 
 ```perl
-bot_message "hi!" # => ok
+bot_message "hi!" # --> {ok => 1}
 ```
 
 ## tech_message (;$message)
@@ -269,7 +296,7 @@ bot_message "hi!" # => ok
 Sends a message to a technical telegram channel.
 
 ```perl
-tech_message "hi!" # => ok
+tech_message "hi!" # --> {ok => 1}
 ```
 
 ## bot_update ()
@@ -277,7 +304,28 @@ tech_message "hi!" # => ok
 Receives the latest messages sent to the bot.
 
 ```perl
-bot_update  # --> 
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+
+    my $offset = from_json($request->content)->{offset};
+    if($offset) {
+        return HTTP::Response->new(200, "OK", undef, to_json {
+            ok => 1,
+            result => [],
+        });
+    }
+
+    HTTP::Response->new(200, "OK", undef, to_json {
+        ok => 1,
+        result => [{
+            message => "hi!",
+            update_id => 0,
+        }],
+    });
+};
+
+bot_update  # --> ["hi!"]
 ```
 
 # SEE ALSO

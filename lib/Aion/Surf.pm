@@ -53,7 +53,7 @@ sub _escape_url_params {
 	ref $param eq "ARRAY"? do {
 		join "&", map _escape_url_params("${key}[]", $_), @$param
 	}:
-	"$key=${\ to_url_param($param)}"
+	join "", $key, "=", to_url_param $param
 }
 
 sub to_url_params(;$) {
@@ -84,7 +84,7 @@ sub _parse_url ($) {
 		( //
 			( (?<user> [^:/?\#\@]* ) :
 		  	  (?<pass> [^/?\#\@]*  ) \@  )?
-			(?<dom> [^/?\#]* )             )?
+			(?<domain> [^/?\#]* )             )?
 		(  / (?<path>  [^?\#]* ) )?
 		(?<part> [^?\#]+ )?
 		( \? (?<query> [^\#]*  ) )?
@@ -107,30 +107,26 @@ sub parse_url($;$$) {
 	my %link = _parse_url $link;
 	my %onpage = _parse_url $onpage;
 
-	if(exists $link{part}) {
-		$link{path} = $onpage{path} =~ m!/\z!? "$onpage{path}$link{part}": "$onpage{path}/$link{part}";
+	if(!exists $link{path}) {
+		$link{path} = join "", $onpage{path}, $onpage{path} =~ m!/\z!? (): "/", $link{part};
 		delete $link{part};
 	}
 
-	if(exists $link{dom}) {
-		$link{proto} //= $onpage{proto};
-	}
-	elsif(exists $link{path}) {
-		$link{proto} //= $onpage{proto};
-		if(!exists $link{dom}) {
-			$link{user} = $onpage{user} if exists $onpage{user};
-			$link{pass} = $onpage{pass} if exists $onpage{pass};
-			$link{dom} = $onpage{dom};
-		}
+	if(exists $link{proto}) {}
+	elsif(exists $link{domain}) {
+		$link{proto} = $onpage{proto};
 	}
 	else {
-		%link = (%onpage, %link);
+		$link{proto} = $onpage{proto};
+		$link{user} = $onpage{user} if exists $onpage{user};
+		$link{pass} = $onpage{pass} if exists $onpage{pass};
+		$link{domain} = $onpage{domain};
 	}
 
 	# нормализуем
 	$link{proto} = lc $link{proto};
-	$link{dom} = lc $link{dom};
-	$link{domen} = $link{dom} =~ s/^www\.//r;
+	$link{domain} = lc $link{domain};
+	$link{dom} = $link{domain} =~ s/^www\.//r;
 	$link{path} = lc $link{path};
 
 	my @path = split m!/!, $link{path}; my @p;
@@ -156,6 +152,8 @@ sub parse_url($;$$) {
 		} else {
 			$link{dir} = "$link{path}/";
 		}
+	} elsif($dir) {
+		$link{path} = "/";
 	} else { delete $link{path} }
 
 	$link{orig} = $orig;
@@ -163,7 +161,7 @@ sub parse_url($;$$) {
 	$link{link} = join "", $link{proto}, "://",
 		exists $link{user} || exists $link{pass}? ($link{user},
 			exists $link{pass}? ":$link{pass}": (), '@'): (),
-		$link{domen},
+		$link{dom},
 		$link{path},
 		length($link{query})? ("?", $link{query}): (),
 		length($link{hash})? ("#", $link{hash}): (),
@@ -173,8 +171,8 @@ sub parse_url($;$$) {
 }
 
 # Нормализует url
-sub normalize_url($;$) {
-	parse_url($_[0], $_[1])->{link}
+sub normalize_url($;$$) {
+	parse_url($_[0], $_[1], $_[2])->{link}
 }
 
 #@category surf
@@ -232,19 +230,19 @@ sub surf(@) {
 		$validate_data->();
 
 		$request->header('Content-Type' => 'application/json; charset=utf-8');
-		$data = to_json($json);
+		$data = to_json $json;
 		utf8::encode($data) if utf8::is_utf8($data);
 		$request->content($data);
 	}
 
 	my $form = delete $set{form};
-	$form = $data, undef $data if not defined $form and ref $data eq "HASH";
+	$form = $data, undef $data if not defined $form and ref $data eq "ARRAY";
 	if(defined $form) {
 		$validate_data->();
 		$data = 1;
 
 		$request->header('Content-Type' => 'application/x-www-form-urlencoded');
-		$request->content(escape_url_params $form);
+		$request->content(to_url_params $form);
 	}
 
 	if($headers = delete($set{headers}) // $headers) {
@@ -260,8 +258,10 @@ sub surf(@) {
 	if(my $cookie_href = delete $set{cookies}) {
 		my $jar = $ua->cookie_jar;
 		my $url_href = parse_url $url;
-		my $domain = $url_href->{dom};
+		my $domain = $url_href->{domain};
 		$domain = "localhost.local" if $domain eq "localhost";
+
+		$cookie_href = {@$cookie_href} if ref $cookie_href eq "ARRAY";
 
 		for my $key (sort keys %$cookie_href) {
 
@@ -270,15 +270,15 @@ sub surf(@) {
 			$av = $val, $val = shift @$av, $av = {@$av} if ref $val;
 
 			$jar->set_cookie(
-				$a->{version},
-				$key => $val,
-				$av->{path} // "/",
-				$av->{domain} // $domain,
-				$av->{port},
-				$av->{path_spec},
-				$av->{secure},
-				$av->{maxage},
-				$av->{discard},
+				delete($a->{version}),
+				to_url_param $key => to_url_param $val,
+				delete($av->{path}) // "/",
+				delete($av->{domain}) // $domain,
+				delete($av->{port}),
+				delete($av->{path_spec}),
+				delete($av->{secure}),
+				delete($av->{maxage}),
+				delete($av->{discard}),
 				$av
 			);
 		}
@@ -299,11 +299,11 @@ sub surf(@) {
 	$content
 }
 
-sub head (;$) { my $x = @_ == 0? $_: shift;	surf HEAD => ref $x? @{$x}: $x }
-sub get  (;$) { my $x = @_ == 0? $_: shift; surf GET => ref $x? @{$x}: $x }
-sub post (;$) { my $x = @_ == 0? $_: shift; surf POST => ref $x? @{$x}: $x }
-sub put  (;$) { my $x = @_ == 0? $_: shift; surf PUT => ref $x? @{$x}: $x }
-sub patch(;$) { my $x = @_ == 0? $_: shift; surf PATCH => ref $x? @{$x}: $x }
+sub head (;$) { my $x = @_ == 0? $_: shift;	surf HEAD   => ref $x? @{$x}: $x }
+sub get  (;$) { my $x = @_ == 0? $_: shift; surf GET    => ref $x? @{$x}: $x }
+sub post (@)  { my $x = @_ == 0? $_: \@_;   surf POST   => ref $x? @{$x}: $x }
+sub put  (@)  { my $x = @_ == 0? $_: \@_;   surf PUT    => ref $x? @{$x}: $x }
+sub patch(@)  { my $x = @_ == 0? $_: \@_;   surf PATCH  => ref $x? @{$x}: $x }
 sub del  (;$) { my $x = @_ == 0? $_: shift; surf DELETE => ref $x? @{$x}: $x }
 
 
@@ -313,14 +313,14 @@ use config TELEGRAM_BOT_TOKEN => undef;
 sub chat_message($$) {
 	my ($chat_id, $message) = @_;
 
-	my $ok = post ["https://api.telegram.org/bot${\ TELEGRAM_BOT_TOKEN}/sendMessage", response => \my $response, json => {
+	my $ok = post "https://api.telegram.org/bot${\ TELEGRAM_BOT_TOKEN}/sendMessage", response => \my $response, json => {
 		chat_id => $chat_id,
 		text => $message,
 		disable_web_page_preview => 1,
 		parse_mode => 'Html',
-	}];
+	};
 
-	p($response), p($ok), die $ok->{description} if !$ok->{ok};
+	die $ok->{description} if !$ok->{ok};
 
 	$ok
 }
@@ -341,9 +341,9 @@ sub bot_update() {
 
 	for(my $offset = 0;;) {
 
-		my $ok = post ["https://api.telegram.org/bot${\ TELEGRAM_BOT_TOKEN}/getUpdates", json => {
+		my $ok = post "https://api.telegram.org/bot${\ TELEGRAM_BOT_TOKEN}/getUpdates", json => {
 			offset => $offset,
-		}];
+		};
 
 		die $ok->{description} if !$ok->{ok};
 
@@ -447,6 +447,8 @@ Translate data to json format.
 Parse string in json format to perl structure.
 
 	from_json '{"a": 10}' # --> {a => 10}
+	
+	[map from_json, "{}", "2"]  # --> [{}, 2]
 
 =head2 to_url_param (;$scalar)
 
@@ -460,7 +462,8 @@ Escape scalar to part of url search.
 
 Generates the search part of the url.
 
-	to_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3
+	local $_ = {a => 1, b => [[1,2],3,{x=>10}]};
+	to_url_params  # => a&b[][]&b[][]=2&b[]=3&b[][x]=10
 
 =over
 
@@ -476,14 +479,24 @@ Generates the search part of the url.
 
 	to_url_params {k => "", n => undef, f => 1}  # => f&k=
 
-=head2 parse_url ($url, $onpage)
+=head2 parse_url ($url, $onpage, $dir)
 
 Parses and normalizes url.
+
+=over
+
+=item * C<$url> — url, or it part for parsing.
+
+=item * C<$onpage> — url page with C<$url>. If C<$url> not complete, then extended it. Optional. By default use config ONPAGE = "off://off".
+
+=item * C<$dir> (bool): 1 — normalize url path with "/" on end, if it is catalog. 0 — without "/".
+
+=back
 
 	my $res = {
 	    proto  => "off",
 	    dom    => "off",
-	    domen  => "off",
+	    domain => "off",
 	    link   => "off://off",
 	    orig   => "",
 	    onpage => "off://off",
@@ -493,8 +506,8 @@ Parses and normalizes url.
 	
 	$res = {
 	    proto  => "https",
-	    dom    => "www.main.com",
-	    domen  => "main.com",
+	    dom    => "main.com",
+	    domain => "www.main.com",
 	    path   => "/page",
 	    dir    => "/page/",
 	    link   => "https://main.com/page",
@@ -508,8 +521,8 @@ Parses and normalizes url.
 	    proto  => "https",
 	    user   => "user",
 	    pass   => "pass",
-	    dom    => "www.x.test",
-	    domen  => "x.test",
+	    dom    => "x.test",
+	    domain => "www.x.test",
 	    path   => "/path",
 	    dir    => "/path/",
 	    query  => "x=10&y=20",
@@ -522,9 +535,11 @@ Parses and normalizes url.
 
 See also C<URL::XS>.
 
-=head2 normalize_url ($url, $onpage)
+=head2 normalize_url ($url, $onpage, $dir)
 
 Normalizes url.
+
+It use C<parse_url>, and it returns link.
 
 	normalize_url ""   # => off://off
 	normalize_url "www.fix.com"  # => off://off/www.fix.com
@@ -563,32 +578,44 @@ C<@params> maybe:
 
 =back
 
-	my $req = "
+	my $req = "MAYBE_ANY_METHOD https://ya.ru/page?z=30&x=10&y=%1F9E8
+	Accept: */*,image/*
+	Content-Type: application/x-www-form-urlencoded
+	
+	x&y=2
 	";
+	
+	my $req_cookies = 'Set-Cookie3: go=""; path="/"; domain=ya.ru; version=0
+	Set-Cookie3: session=%1F9E8; path="/page"; domain=ya.ru; version=0
+	';
 	
 	# mock
 	*LWP::UserAgent::request = sub {
 	    my ($ua, $request) = @_;
 	
 	    $request->as_string # -> $req
+	    $ua->cookie_jar->as_string  # -> $req_cookies
 	
 	    my $response = HTTP::Response->new(200, "OK");
+	    $response->content(3.14);
 	    $response
 	};
 	
-	
-	my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
+	my $res = surf MAYBE_ANY_METHOD => "https://ya.ru/page?z=30", [x => 1, y => 2, z => undef],
+	    headers => [
 	        'Accept' => '*/*,image/*',
 	    ],
 	    query => [x => 10, y => "🧨"],
+	    response => \my $response,
 	    cookies => {
 	        go => "",
-	        session => ["abcd", path => "/page"],
+	        session => ["🧨", path => "/page"],
 	    },
 	;
-	$res # -> .3
+	$res           # -> 3.14
+	ref $response  # => HTTP::Response
 
-=head2 head (;$)
+=head2 head (;$url)
 
 Check resurce in internet. Returns C<1> if exists resurce in internet, otherwice returns C<"">.
 
@@ -596,15 +623,15 @@ Check resurce in internet. Returns C<1> if exists resurce in internet, otherwice
 
 Get content from resurce in internet.
 
-=head2 post (;$url)
+=head2 post (;$url, [$headers_href], %params)
 
 Add content resurce in internet.
 
-=head2 put (;$url)
+=head2 put (;$url, [$headers_href], %params)
 
 Create or update resurce in internet.
 
-=head2 patch (;$url)
+=head2 patch (;$url, [$headers_href], %params)
 
 Set attributes on resurce in internet.
 
@@ -616,25 +643,52 @@ Delete resurce in internet.
 
 Sends a message to a telegram chat.
 
-	chat_message "ABCD", "hi!"  # => ok
+	# mock
+	*LWP::UserAgent::request = sub {
+	    my ($ua, $request) = @_;
+	    HTTP::Response->new(200, "OK", undef, to_json {ok => 1});
+	};
+	
+	chat_message "ABCD", "hi!"  # --> {ok => 1}
 
 =head2 bot_message (;$message)
 
 Sends a message to a telegram bot.
 
-	bot_message "hi!" # => ok
+	bot_message "hi!" # --> {ok => 1}
 
 =head2 tech_message (;$message)
 
 Sends a message to a technical telegram channel.
 
-	tech_message "hi!" # => ok
+	tech_message "hi!" # --> {ok => 1}
 
 =head2 bot_update ()
 
 Receives the latest messages sent to the bot.
 
-	bot_update  # --> 
+	# mock
+	*LWP::UserAgent::request = sub {
+	    my ($ua, $request) = @_;
+	
+	    my $offset = from_json($request->content)->{offset};
+	    if($offset) {
+	        return HTTP::Response->new(200, "OK", undef, to_json {
+	            ok => 1,
+	            result => [],
+	        });
+	    }
+	
+	    HTTP::Response->new(200, "OK", undef, to_json {
+	        ok => 1,
+	        result => [{
+	            message => "hi!",
+	            update_id => 0,
+	        }],
+	    });
+	};
+	
+	bot_update  # --> ["hi!"]
 
 =head1 SEE ALSO
 

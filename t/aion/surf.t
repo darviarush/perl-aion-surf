@@ -87,6 +87,8 @@ local $_ = $data;
 done_testing; }; subtest 'from_json ($string)' => sub { 
 ::is_deeply scalar do {from_json '{"a": 10}'}, scalar do {{a => 10}}, 'from_json \'{"a": 10}\' # --> {a => 10}';
 
+::is_deeply scalar do {[map from_json, "{}", "2"]}, scalar do {[{}, 2]}, '[map from_json, "{}", "2"]  # --> [{}, 2]';
+
 # 
 # ## to_url_param (;$scalar)
 # 
@@ -103,7 +105,8 @@ done_testing; }; subtest 'to_url_param (;$scalar)' => sub {
 # Generates the search part of the url.
 # 
 done_testing; }; subtest 'to_url_params (;$hash_ref)' => sub { 
-::is scalar do {to_url_params {a => 1, b => [[1,2],3]}}, "a&b[][]&b[][]=2&b[]=3", 'to_url_params {a => 1, b => [[1,2],3]}  # => a&b[][]&b[][]=2&b[]=3';
+local $_ = {a => 1, b => [[1,2],3,{x=>10}]};
+::is scalar do {to_url_params}, "a&b[][]&b[][]=2&b[]=3&b[][x]=10", 'to_url_params  # => a&b[][]&b[][]=2&b[]=3&b[][x]=10';
 
 # 
 # 1. Keys with undef values not stringify.
@@ -115,15 +118,19 @@ done_testing; }; subtest 'to_url_params (;$hash_ref)' => sub {
 ::is scalar do {to_url_params {k => "", n => undef, f => 1}}, "f&k=", 'to_url_params {k => "", n => undef, f => 1}  # => f&k=';
 
 # 
-# ## parse_url ($url, $onpage)
+# ## parse_url ($url, $onpage, $dir)
 # 
 # Parses and normalizes url.
 # 
-done_testing; }; subtest 'parse_url ($url, $onpage)' => sub { 
+# * `$url` — url, or it part for parsing.
+# * `$onpage` — url page with `$url`. If `$url` not complete, then extended it. Optional. By default use config ONPAGE = "off://off".
+# * `$dir` (bool): 1 — normalize url path with "/" on end, if it is catalog. 0 — without "/".
+# 
+done_testing; }; subtest 'parse_url ($url, $onpage, $dir)' => sub { 
 my $res = {
     proto  => "off",
     dom    => "off",
-    domen  => "off",
+    domain => "off",
     link   => "off://off",
     orig   => "",
     onpage => "off://off",
@@ -133,8 +140,8 @@ my $res = {
 
 $res = {
     proto  => "https",
-    dom    => "www.main.com",
-    domen  => "main.com",
+    dom    => "main.com",
+    domain => "www.main.com",
     path   => "/page",
     dir    => "/page/",
     link   => "https://main.com/page",
@@ -148,8 +155,8 @@ $res = {
     proto  => "https",
     user   => "user",
     pass   => "pass",
-    dom    => "www.x.test",
-    domen  => "x.test",
+    dom    => "x.test",
+    domain => "www.x.test",
     path   => "/path",
     dir    => "/path/",
     query  => "x=10&y=20",
@@ -163,11 +170,13 @@ $res = {
 # 
 # See also `URL::XS`.
 # 
-# ## normalize_url ($url, $onpage)
+# ## normalize_url ($url, $onpage, $dir)
 # 
 # Normalizes url.
 # 
-done_testing; }; subtest 'normalize_url ($url, $onpage)' => sub { 
+# It use `parse_url`, and it returns link.
+# 
+done_testing; }; subtest 'normalize_url ($url, $onpage, $dir)' => sub { 
 ::is scalar do {normalize_url ""}, "off://off", 'normalize_url ""   # => off://off';
 ::is scalar do {normalize_url "www.fix.com"}, "off://off/www.fix.com", 'normalize_url "www.fix.com"  # => off://off/www.fix.com';
 ::is scalar do {normalize_url ":"}, "off://off/:", 'normalize_url ":"  # => off://off/:';
@@ -198,33 +207,45 @@ done_testing; }; subtest 'normalize_url ($url, $onpage)' => sub {
 # * `response` - returns response (as HTTP::Response) by this reference.
 # 
 done_testing; }; subtest 'surf (\[$method], $url, \[$data], %params)' => sub { 
-my $req = "
+my $req = "MAYBE_ANY_METHOD https://ya.ru/page?z=30&x=10&y=%1F9E8
+Accept: */*,image/*
+Content-Type: application/x-www-form-urlencoded
+
+x&y=2
 ";
+
+my $req_cookies = 'Set-Cookie3: go=""; path="/"; domain=ya.ru; version=0
+Set-Cookie3: session=%1F9E8; path="/page"; domain=ya.ru; version=0
+';
 
 # mock
 *LWP::UserAgent::request = sub {
     my ($ua, $request) = @_;
 
 ::is scalar do {$request->as_string}, scalar do{$req}, '    $request->as_string # -> $req';
+::is scalar do {$ua->cookie_jar->as_string}, scalar do{$req_cookies}, '    $ua->cookie_jar->as_string  # -> $req_cookies';
 
     my $response = HTTP::Response->new(200, "OK");
+    $response->content(3.14);
     $response
 };
 
-
-my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
+my $res = surf MAYBE_ANY_METHOD => "https://ya.ru/page?z=30", [x => 1, y => 2, z => undef],
+    headers => [
         'Accept' => '*/*,image/*',
     ],
     query => [x => 10, y => "🧨"],
+    response => \my $response,
     cookies => {
         go => "",
-        session => ["abcd", path => "/page"],
+        session => ["🧨", path => "/page"],
     },
 ;
-::is scalar do {$res}, scalar do{.3}, '$res # -> .3';
+::is scalar do {$res}, scalar do{3.14}, '$res           # -> 3.14';
+::is scalar do {ref $response}, "HTTP::Response", 'ref $response  # => HTTP::Response';
 
 # 
-# ## head (;$)
+# ## head (;$url)
 # 
 # Check resurce in internet. Returns `1` if exists resurce in internet, otherwice returns `""`.
 # 
@@ -232,15 +253,15 @@ my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
 # 
 # Get content from resurce in internet.
 # 
-# ## post (;$url)
+# ## post (;$url, \[$headers_href], %params)
 # 
 # Add content resurce in internet.
 # 
-# ## put (;$url)
+# ## put (;$url, \[$headers_href], %params)
 # 
 # Create or update resurce in internet.
 # 
-# ## patch (;$url)
+# ## patch (;$url, \[$headers_href], %params)
 # 
 # Set attributes on resurce in internet.
 # 
@@ -253,7 +274,13 @@ my $res = surf MAYBE_ANY_METHOD => "https://ya.ru", [
 # Sends a message to a telegram chat.
 # 
 done_testing; }; subtest 'chat_message ($chat_id, $message)' => sub { 
-::is scalar do {chat_message "ABCD", "hi!"}, "ok", 'chat_message "ABCD", "hi!"  # => ok';
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+    HTTP::Response->new(200, "OK", undef, to_json {ok => 1});
+};
+
+::is_deeply scalar do {chat_message "ABCD", "hi!"}, scalar do {{ok => 1}}, 'chat_message "ABCD", "hi!"  # --> {ok => 1}';
 
 # 
 # ## bot_message (;$message)
@@ -261,7 +288,7 @@ done_testing; }; subtest 'chat_message ($chat_id, $message)' => sub {
 # Sends a message to a telegram bot.
 # 
 done_testing; }; subtest 'bot_message (;$message)' => sub { 
-::is scalar do {bot_message "hi!"}, "ok", 'bot_message "hi!" # => ok';
+::is_deeply scalar do {bot_message "hi!"}, scalar do {{ok => 1}}, 'bot_message "hi!" # --> {ok => 1}';
 
 # 
 # ## tech_message (;$message)
@@ -269,7 +296,7 @@ done_testing; }; subtest 'bot_message (;$message)' => sub {
 # Sends a message to a technical telegram channel.
 # 
 done_testing; }; subtest 'tech_message (;$message)' => sub { 
-::is scalar do {tech_message "hi!"}, "ok", 'tech_message "hi!" # => ok';
+::is_deeply scalar do {tech_message "hi!"}, scalar do {{ok => 1}}, 'tech_message "hi!" # --> {ok => 1}';
 
 # 
 # ## bot_update ()
@@ -277,7 +304,28 @@ done_testing; }; subtest 'tech_message (;$message)' => sub {
 # Receives the latest messages sent to the bot.
 # 
 done_testing; }; subtest 'bot_update ()' => sub { 
-::is_deeply scalar do {bot_update}, scalar do { }, 'bot_update  # -->';
+# mock
+*LWP::UserAgent::request = sub {
+    my ($ua, $request) = @_;
+
+    my $offset = from_json($request->content)->{offset};
+    if($offset) {
+        return HTTP::Response->new(200, "OK", undef, to_json {
+            ok => 1,
+            result => [],
+        });
+    }
+
+    HTTP::Response->new(200, "OK", undef, to_json {
+        ok => 1,
+        result => [{
+            message => "hi!",
+            update_id => 0,
+        }],
+    });
+};
+
+::is_deeply scalar do {bot_update}, scalar do {["hi!"]}, 'bot_update  # --> ["hi!"]';
 
 # 
 # # SEE ALSO
