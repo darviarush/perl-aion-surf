@@ -326,6 +326,17 @@ Receives the latest messages sent to the bot.
 };
 
 bot_update  # --> ["hi!"]
+
+
+# mock
+*LWP::UserAgent::request = sub {
+    HTTP::Response->new(200, "OK", undef, to_json {
+        ok => 0,
+        description => "nooo!"
+    })
+};
+
+eval { bot_update }; $@  # ~> nooo!
 ```
 
 # SEE ALSO

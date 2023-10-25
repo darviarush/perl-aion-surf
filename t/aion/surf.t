@@ -327,6 +327,17 @@ done_testing; }; subtest 'bot_update ()' => sub {
 
 ::is_deeply scalar do {bot_update}, scalar do {["hi!"]}, 'bot_update  # --> ["hi!"]';
 
+
+# mock
+*LWP::UserAgent::request = sub {
+    HTTP::Response->new(200, "OK", undef, to_json {
+        ok => 0,
+        description => "nooo!"
+    })
+};
+
+::like scalar do {eval { bot_update }; $@}, qr!nooo\!!, 'eval { bot_update }; $@  # ~> nooo!';
+
 # 
 # # SEE ALSO
 # 
