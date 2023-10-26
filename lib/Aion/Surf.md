@@ -60,7 +60,7 @@ Aion::Surf contains a minimal set of functions for surfing the Internet. The pur
 
 # SUBROUTINES
 
-## to_json ($data)
+## to_json (;$data)
 
 Translate data to json format.
 
@@ -80,7 +80,7 @@ local $_ = $data;
 to_json # -> $result
 ```
 
-## from_json ($string)
+## from_json (;$string)
 
 Parse string in json format to perl structure.
 
