@@ -70,7 +70,7 @@
          "web" : "https://github.com/darviarush/perl-aion-surf"
       }
    },
-   "version" : "0.0.0",
+   "version" : "0.0.1",
    "x_authority" : "cpan:DART",
    "x_contributors" : [
       "Yaroslav O. Kosmina <dart@cpan.org>",

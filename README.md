@@ -5,7 +5,7 @@ Aion::Surf - surfing by internet
 
 # VERSION
 
-0.0.0-prealpha
+0.0.1
 
 # SYNOPSIS
 
