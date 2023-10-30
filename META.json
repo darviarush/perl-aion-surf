@@ -4,7 +4,7 @@
       "Yaroslav O. Kosmina LL<mailto:dart@cpan.org>"
    ],
    "dynamic_config" : 0,
-   "generated_by" : "Minilla/v3.1.19, CPAN::Meta::Converter version 2.150010",
+   "generated_by" : "Minilla/v3.1.22, CPAN::Meta::Converter version 2.150010",
    "license" : [
       "gpl_3"
    ],
@@ -44,8 +44,8 @@
       },
       "runtime" : {
          "requires" : {
+            "Aion::Format" : "v0.0.2",
             "HTTP::Cookies" : "0",
-            "JSON::XS" : "4.03",
             "LWP::UserAgent" : "6.72",
             "List::Util" : "0",
             "common::sense" : "0",
@@ -70,7 +70,7 @@
          "web" : "https://github.com/darviarush/perl-aion-surf"
       }
    },
-   "version" : "0.0.1",
+   "version" : "0.0.3",
    "x_authority" : "cpan:DART",
    "x_contributors" : [
       "Yaroslav O. Kosmina <dart@cpan.org>",

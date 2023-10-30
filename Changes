@@ -2,6 +2,10 @@ Revision history for Perl extension Aion::Surf
 
 {{$NEXT}}
 
+0.0.3 2023-10-30T19:06:15Z
+
+    - fix dependence in test
+
 0.0.1 2023-10-26T09:39:16Z
 
     - documentation complete

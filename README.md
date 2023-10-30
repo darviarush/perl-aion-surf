@@ -1,10 +1,11 @@
+[![Actions Status](https://github.com/darviarush/perl-aion-surf/actions/workflows/test.yml/badge.svg)](https://github.com/darviarush/perl-aion-surf/actions)
 # NAME
 
 Aion::Surf - surfing by internet
 
 # VERSION
 
-0.0.1
+0.0.3
 
 # SYNOPSIS
 
