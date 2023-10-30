@@ -8,7 +8,8 @@ our $VERSION = "0.0.1";
 use List::Util qw/pairmap/;
 use LWP::UserAgent qw//;
 use HTTP::Cookies qw//;
-use Aion::Format::Json qw/to_json from_json/;
+use Aion::Format::Json qw//;
+use Aion::Format::Url qw//;
 
 use Exporter qw/import/;
 our @EXPORT = our @EXPORT_OK = grep {
@@ -56,7 +57,8 @@ sub surf(@) {
 
 	my $query = delete $set{query};
 	if(defined $query) {
-		$url = join "", $url, $url =~ /\?/ ? "&": "?", to_url_params $query;
+		$url = join "", $url, $url =~ /\?/ ? "&": "?",
+			Aion::Format::Url::to_url_params $query;
 	}
 
 	my $request = HTTP::Request->new($method => $url);
@@ -73,7 +75,7 @@ sub surf(@) {
 		$validate_data->();
 
 		$request->header('Content-Type' => 'application/json; charset=utf-8');
-		$data = to_json $json;
+		$data = Aion::Format::Json::to_json $json;
 		utf8::encode($data) if utf8::is_utf8($data);
 		$request->content($data);
 	}
@@ -85,7 +87,7 @@ sub surf(@) {
 		$data = 1;
 
 		$request->header('Content-Type' => 'application/x-www-form-urlencoded');
-		$request->content(to_url_params $form);
+		$request->content(Aion::Format::Url::to_url_params $form);
 	}
 
 	if($headers = delete($set{headers}) // $headers) {
@@ -100,7 +102,7 @@ sub surf(@) {
 
 	if(my $cookie_href = delete $set{cookies}) {
 		my $jar = $ua->cookie_jar;
-		my $url_href = parse_url $url;
+		my $url_href = Aion::Format::Url::parse_url $url;
 		my $domain = $url_href->{domain};
 		$domain = "localhost.local" if $domain eq "localhost";
 
@@ -114,7 +116,8 @@ sub surf(@) {
 
 			$jar->set_cookie(
 				delete($a->{version}),
-				to_url_param $key => to_url_param $val,
+				Aion::Format::Url::to_url_param $key
+					=> Aion::Format::Url::to_url_param $val,
 				delete($av->{path}) // "/",
 				delete($av->{domain}) // $domain,
 				delete($av->{port}),
@@ -137,7 +140,7 @@ sub surf(@) {
 	return $response->is_success if $method eq "HEAD";
 
 	my $content = $response->decoded_content;
-	eval { $content = from_json($content) } if $content =~ m!^\{!;
+	eval { $content = Aion::Format::Json::from_json($content) } if $content =~ m!^\{!;
 
 	$content
 }
