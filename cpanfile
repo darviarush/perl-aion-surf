@@ -12,4 +12,4 @@ requires 'List::Util';
 requires 'LWP::UserAgent', '6.72';
 requires 'HTTP::Cookies';
 
-requires 'Aion::Format';
+requires 'Aion::Format', '0.0.2';

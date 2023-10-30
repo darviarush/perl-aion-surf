@@ -356,6 +356,7 @@ Delete resurce in internet.
 Sends a message to a telegram chat.
 
 	# mock
+	use Aion::Format::Json;
 	*LWP::UserAgent::request = sub {
 	    my ($ua, $request) = @_;
 	    HTTP::Response->new(200, "OK", undef, to_json {ok => 1});

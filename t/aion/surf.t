@@ -142,6 +142,7 @@ my $res = surf MAYBE_ANY_METHOD => "https://ya.ru/page?z=30", [x => 1, y => 2, z
 # 
 done_testing; }; subtest 'chat_message ($chat_id, $message)' => sub { 
 # mock
+use Aion::Format::Json;
 *LWP::UserAgent::request = sub {
     my ($ua, $request) = @_;
     HTTP::Response->new(200, "OK", undef, to_json {ok => 1});
