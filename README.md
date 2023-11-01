@@ -1,4 +1,4 @@
-[![Actions Status](https://github.com/darviarush/perl-aion-surf/actions/workflows/test.yml/badge.svg)](https://github.com/darviarush/perl-aion-surf/actions)
+[![Actions Status](https://github.com/darviarush/perl-aion-surf/actions/workflows/test.yml/badge.svg)](https://github.com/darviarush/perl-aion-surf/actions) [![MetaCPAN Release](https://badge.fury.io/pl/Aion-Surf.svg)](https://metacpan.org/release/Aion-Surf)
 # NAME
 
 Aion::Surf - surfing by internet
